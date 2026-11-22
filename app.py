@@ -14,13 +14,15 @@ import webview
 
 import scan
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
 
 # Runs inside the dispensary's page in the sign-in window. Keeps only point/reward/offer lines and drops
 # anything that looks like an email or phone number. Nothing is sent anywhere; it's returned to this app only.
+READY_JS = r"""(()=>{const t=(document.body&&document.body.innerText)||'';if(/(select|choose|pick) (your |a )?(state|location|store)|are you (over|at least|a)|age verification|verify your age/i.test(t))return -1;return [...document.querySelectorAll('body *')].filter(e=>e.children.length===0&&/^\$\s?\d/.test((e.textContent||'').trim())).length})()"""
+
 READ_REWARDS_JS = r"""(()=>{const L=document.body.innerText.split(/\n+/).map(s=>s.trim()).filter(s=>s.length>2&&s.length<200&&/(point|pts|reward|\$|%|off|birthday|coupon|offer|free|credit|voucher)/i.test(s)&&!/@|\d{3}[-. )]+\d{3}[-. ]\d{4}/.test(s)).slice(0,60);return JSON.stringify({site:location.hostname.replace(/^www\./,'').split('.')[0],lines:L})})()"""
 
 
@@ -65,8 +67,8 @@ for(const leaf of [...document.querySelectorAll('body *')].filter(isPrice).slice
  const vals=[...card.querySelectorAll('*')].filter(isPrice).map(e=>({v:parseFloat(T(e.textContent).replace(/[$\s]/g,'')),s:struck(e)})).filter(x=>x.v>0);
  if(!vals.length)continue;const now=vals.filter(x=>!x.s).map(x=>x.v),was=vals.filter(x=>x.s).map(x=>x.v);
  const price=now.length?Math.min(...now):Math.min(...vals.map(x=>x.v));const wasP=was.length?Math.max(...was):null;
- const name=t.split(/\n+/).map(T).filter(s=>s.length>3&&s.length<140&&!/\$|add to (cart|bag)|^\d+\s*%|^(sale|new|qty|quantity|in stock|sold out)/i.test(s)).sort((a,b)=>b.length-a.length)[0]||'';
- if(!name)continue;items.push({name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0])});if(items.length>=400)break}
+ const name=t.split(/\n+/).map(x=>T(x.replace(/\$\s?\d[\d,.]*/g,' '))).filter(s=>s.length>3&&s.length<140&&!/\$|add to (cart|bag)|^\d+\s*%|^(sale|new|qty|quantity|in stock|sold out)/i.test(s)).sort((a,b)=>b.length-a.length)[0]||'';
+ if(!name)continue;items.push({name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:(t.split(/\n+/).map(T).find(x=>x.length>1&&x.length<30&&x!==name&&!/\$|%|thc|terp|^\d|indica|sativa|hybrid|sale|new|\|/i.test(x))||'')});if(items.length>=400)break}
 const host=location.hostname;const links=[...document.querySelectorAll('a[href]')].map(a=>({h:a.href.split('#')[0],t:T(a.innerText).toLowerCase()})).filter(x=>{try{return new URL(x.h).hostname===host&&x.h!==location.href}catch(e){return false}});
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
 const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
@@ -76,7 +78,7 @@ return JSON.stringify({url:location.href,lines,items,links:[...new Set([...pick(
 class BrowserReader:
     """A few hidden browser windows that load dispensary pages like Edge would, so JavaScript menus and sale prices show up."""
 
-    def __init__(self, n=3):
+    def __init__(self, n=8):
         self.pool = queue.Queue()
         self.wins = []
         for i in range(n):
@@ -93,7 +95,7 @@ class BrowserReader:
             ev.clear()
             w.load_url(url)
             ev.wait(25)
-            time.sleep(3)
+            self._settle(w)
             args = json.dumps([ctx.get("state", ""), ctx.get("zip", ""), ctx.get("city", ""), bool(ctx.get("agree"))])[1:-1]
             last = None
             for _ in range(6):  # gates can come one after another (state -> age -> store)
@@ -101,24 +103,40 @@ class BrowserReader:
                 if not did or did == last:
                     break
                 last = did
-                time.sleep(3)
+                time.sleep(1.5)
+                self._settle(w)
             cur = w.get_current_url() or ""
             if cur and cur.rstrip("/") != url.rstrip("/") and "deals" not in url:
                 ev.clear()
                 w.load_url(url)  # the store picker may have sent us elsewhere; come back to the page we wanted
                 ev.wait(25)
-                time.sleep(3)
+                self._settle(w)
             for _ in range(8):
                 if not w.evaluate_js(LOAD_MORE_JS):
                     time.sleep(0.8)
                     if not w.evaluate_js(LOAD_MORE_JS):
                         break
-                time.sleep(2)
+                time.sleep(1.2)
             return json.loads(w.evaluate_js(EXTRACT_JS) or "{}")
         except Exception:
             return {}
         finally:
             self.pool.put((w, ev))
+
+    @staticmethod
+    def _settle(w, limit=7.0):
+        """Wait until prices appear and stop changing (or a gate shows) instead of a fixed pause."""
+        end, last = time.time() + limit, None
+        time.sleep(0.6)
+        while time.time() < end:
+            try:
+                n = w.evaluate_js(READY_JS)
+            except Exception:
+                n = None
+            if n == -1 or (n and n == last):
+                return
+            last = n
+            time.sleep(0.6)
 
     def close(self):
         for w in self.wins:
@@ -170,24 +188,43 @@ class Api:
     def locate_me(self):
         return scan.locate_me()
 
-    def scan(self, lat, lon, miles, force=False, agree=False):
+    def cached(self, lat, lon, miles):
+        try:
+            return scan.cached(float(lat), float(lon), float(miles))
+        except Exception as e:
+            return {"dispensaries": [], "updated": None, "error": f"{e}"}
+
+    def scan(self, lat, lon, miles, force=False, agree=False, only_host=None, workers=8):
         def progress(done, total):
             try:
                 main.evaluate_js(f"window.onScanProgress && window.onScanProgress({done},{total})")
             except Exception:
                 pass
+        def on_site(disps):
+            try:
+                main.evaluate_js(f"window.onSiteResult && window.onSiteResult({json.dumps(disps)})")
+            except Exception:
+                pass
         reader = None
         try:
-            reader = BrowserReader()
+            reader = BrowserReader(1 if only_host else max(1, min(int(workers or 8), 12)))
         except Exception:
             reader = None
         try:
-            return scan.scan(float(lat), float(lon), float(miles), bool(force), progress, reader, bool(agree))
+            return scan.scan(float(lat), float(lon), float(miles), bool(force), progress, reader, bool(agree), on_site, only_host,
+                             int(workers or 8))
         except Exception as e:
             return {"dispensaries": [], "updated": None, "error": f"Scan failed: {e}"}
         finally:
             if reader:
                 reader.close()
+
+    def clear_cache(self):
+        try:
+            os.remove(scan.CACHE_FILE)
+        except Exception:
+            pass
+        return True
 
     # ----- rewards sign-in (you type your login into the dispensary's own page; the app never sees it) -----
     def open_login(self, url):

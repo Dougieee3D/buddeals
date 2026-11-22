@@ -46,15 +46,15 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
   <div class="row" style="margin-top:8px">
     <label>Radius <b id="rv">25</b> mi</label><input id="radius" type="range" min="5" max="150" step="5" value="25" style="flex:1;padding:0">
     <select id="sort" title="Sort">
-      <option value="score">Biggest discount</option><option value="ppg">Cheapest per gram</option><option value="price">Lowest price</option><option value="near">Best deal nearby</option><option value="dist">Closest</option>
+      <option value="score">Biggest discount</option><option value="ppg">Cheapest per gram</option><option value="price">Lowest price</option><option value="thc">Best THC value</option><option value="near">Best deal nearby</option><option value="dist">Closest</option>
     </select>
   </div>
   <div class="chips" id="cats"></div>
-  <div class="row" style="font-size:13px">
-    <label><input type="checkbox" id="today" checked> Today only</label>
-    <label><input type="checkbox" id="hidenew" checked> Hide first-time-only</label>
-    <label><input type="checkbox" id="favonly"> ⭐ Favorites only</label>
+  <div class="row" style="margin-top:6px">
+    <input id="qs" placeholder="🔎 Search every menu: Blue Dream, cart, Roll One, gummies…" style="flex:1;min-width:200px">
+    <label style="font-size:13px"><input type="checkbox" id="favonly"> ⭐ Favorites only</label>
   </div>
+  <div class="chips" id="saved"></div>
   <nav class="tabs" id="tabs"></nav>
 </header>
 <main>
@@ -95,6 +95,7 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
     </div>
     <div class="grid" id="wallet" style="margin-top:12px"></div>
   </section>
+  <section id="t-settings" class="hide"><div id="settings" class="form" style="max-width:760px"></div></section>
   <section id="t-places" class="hide"><div class="grid" id="places"></div></section>
   <section id="t-map" class="hide"><div id="map"></div></section>
   <section id="t-add" class="hide">
@@ -129,7 +130,7 @@ const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, {
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const _UNUSED = 'dispensar|cannabis|marijuana|weed|Trulieve|Curaleaf|Sunnyside|Liberty Health|Fluent|M[UÜ]V|Surterra|Vidacann|Insa|RISE|Zen Leaf|AYR|GrowHealthy|Jungle Boys|Sanctuary|Flowery|Green Dragon|Cookies|Planet 13|Thrive|Cannabist|Beyond Hello|Verilife|Story Cannabis|Gold Flora';
 
-const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals' }, ls.get('settings', {}));
+const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals', shopped: [], used: {}, hide: [], places: [], textSize: 100, autoUpdate: true, bgRefresh: true, workers: 8 }, ls.get('settings', {}));
 const P = new URLSearchParams(location.search);
 if (P.get('q')) { S.q = P.get('q'); S.center = null; }
 if (P.get('r')) S.radius = +P.get('r');
@@ -165,17 +166,27 @@ function build() {
   $('#dsites').innerHTML = [...new Set(DISPS.filter(d => d.website).map(d => d.website))].map(w => `<option value="${esc(w)}">`).join('');
 }
 function productDeal(x) {
-  const pct = x.was ? 1 - x.price / x.was : 0, ppg = x.grams ? x.price / x.grams : null;
+  const pct = x.was && !x.inflated ? 1 - x.price / x.was : 0, ppg = x.grams ? x.price / x.grams : null;
+  const p100 = x.mgThc ? x.price / x.mgThc * 100 : null;
   return { text: x.name, cats: x.cats || ['all'], days: null, groups: [], newOnly: false, expired: false, threshold: 0, kind: 'item', item: true,
-    pct, score: pct >= 0.01 ? pct : 0, label: pct >= 0.01 ? `${Math.round(pct * 100)}% OFF` : money(x.price),
-    price: x.price, was: x.was, ppg, grams: x.grams, src: x.src };
+    pct, score: (pct >= 0.01 ? pct : 0) + (x.isLow ? 0.05 : 0), label: pct >= 0.01 ? `${Math.round(pct * 100)}% OFF` : money(x.price),
+    price: x.price, was: x.was, ppg, p100, grams: x.grams, thc: x.thc, mgThc: x.mgThc, brand: x.brand, type: x.type,
+    isLow: x.isLow, inflated: x.inflated, typical: x.typical, daysSeen: x.daysSeen, src: x.src };
+}
+const storeKey = d => d.host || norm(d.name);
+const usedKey = (d, p) => storeKey(d) + '|' + norm(p.text);
+const shopped = d => (S.shopped || []).some(k => k === storeKey(d) || k === norm(d.name));
+function hidden(d, p) {
+  const hay = `${p.text} ${p.brand || ''} ${d.name}`.toLowerCase();
+  return (S.hide || []).some(w => w && hay.includes(w.toLowerCase()));
 }
 function visibleDeals() {
   const out = [];
   for (const d of DISPS) {
     if (S.favonly && !favs.has(d.id)) continue;
     for (const p of d.parsed) {
-      if (p.expired || (S.today && !appliesToday(p)) || (S.hidenew && p.newOnly) || !matchesCat(p, S.cat)) continue;
+      if (p.expired || !appliesToday(p) || (p.newOnly && shopped(d)) || S.used?.[usedKey(d, p)] || !matchesCat(p, S.cat) || hidden(d, p)) continue;
+      if (QS && !`${p.text} ${p.brand || ''} ${p.type || ''} ${d.name}`.toLowerCase().includes(QS)) continue;
       out.push({ d, p });
     }
   }
@@ -183,6 +194,7 @@ function visibleDeals() {
   const ppg = x => x.p.ppg ?? Infinity, pr = x => x.p.price ?? Infinity;
   if (S.sort === 'ppg') { out.sort((a, b) => ppg(a) - ppg(b) || pr(a) - pr(b)); return out; }
   if (S.sort === 'price') { out.sort((a, b) => pr(a) - pr(b) || b.p.score - a.p.score); return out; }
+  if (S.sort === 'thc') { const t = x => x.p.p100 ?? Infinity; out.sort((a, b) => t(a) - t(b) || pr(a) - pr(b)); return out; }
   out.sort(S.sort === 'dist' ? (a, b) => a.d.dist - b.d.dist || b.p.score - a.p.score : S.sort === 'near' ? (a, b) => near(b) - near(a) : (a, b) => b.p.score - a.p.score || a.d.dist - b.d.dist);
   return out;
 }
@@ -205,12 +217,18 @@ function renderDeals() {
         ${p.groups.filter(g => !p.yours || g !== 'Members').map(g => `<span class="tag">${g}</span>`).join('')}
         ${p.newOnly ? '<span class="tag warn">first-time only</span>' : ''}${p.expires ? `<span class="tag">ends ${p.expires.slice(5)}</span>` : ''}
         ${budget && p.threshold && p.threshold * (1 - (p.pct || 0)) > budget ? `<span class="tag warn">needs ${money(p.threshold)} cart</span>` : ''}
+        ${p.isLow ? '<span class="tag today">🔻 lowest in 30 days</span>' : ''}${p.inflated ? `<span class="tag warn">⚠ “was” price looks inflated — usually ${money(p.typical)}</span>` : ''}
         ${d.stale ? '<span class="tag warn">site didn’t load last scan</span>' : ''}</div>
-      <div class="dtext">${p.item ? `<b>${esc(p.text)}</b><br>${money(p.price)}${p.was ? ` <s style="color:var(--dim)">${money(p.was)}</s>` : ''}${p.ppg ? ` · ${money(p.ppg)}/g` : ''}${p.pct < 0.01 ? ' <span class="tag">regular price</span>' : ''}` : esc(p.text)}</div>
-      <div class="meta"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}</div>
-      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">Source</a>` : ''}<button data-share="${i}">Share</button></div>
-    </div>`).join('') : `<div class="card">No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found${S.today ? ' for today' : ''} within ${S.radius} mi. Try a bigger radius, turn off "Today only", check the <b>Places</b> tab for menus, or add a deal you saw.</div>`;
-  $('#deals').onclick = e => { const b = e.target.closest('[data-share]'); if (b) share(list[+b.dataset.share]); };
+      <div class="dtext">${p.item ? `<b>${esc(p.text)}</b>${p.brand ? ` <span class="meta">${esc(p.brand)}</span>` : ''}<br>${money(p.price)}${p.was ? ` <s style="color:var(--dim)">${money(p.was)}</s>` : ''}${p.ppg ? ` · ${money(p.ppg)}/g` : ''}${p.thc ? ` · ${p.thc}% THC` : ''}${p.p100 ? ` · ${money(p.p100)}/100mg THC` : ''}${p.type ? ` · ${esc(p.type)}` : ''}${p.pct < 0.01 ? ' <span class="tag">regular price</span>' : ''}` : esc(p.text)}</div>
+      <div class="meta"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
+      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">Source</a>` : ''}<button data-share="${i}">Share</button><button data-used="${i}" title="Hide this deal (already used it)">✓ Used</button>${d.host ? `<button data-reread="${esc(d.host)}" title="Read this store's menu again now">↻ Re-read</button>` : ''}</div>
+    </div>`).join('') : `<div class="card">No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found for today within ${S.radius} mi${QS ? ` matching “${esc(QS)}”` : ''}. ${scanning ? 'Still reading menus — results appear as each store finishes.' : 'Try a bigger radius, hit 🔄 Refresh, or check the <b>Stores</b> tab.'}</div>`;
+  $('#deals').onclick = e => {
+    const b = e.target.closest('[data-share],[data-used],[data-reread]'); if (!b) return;
+    if (b.dataset.share) share(list[+b.dataset.share]);
+    if (b.dataset.used) { const { d, p } = list[+b.dataset.used]; S.used = { ...(S.used || {}), [usedKey(d, p)]: { at: new Date().toISOString(), label: `${p.label} — ${p.text}`.slice(0, 140), store: d.name } }; render(); toast('Marked as used. Restore it in ⚙️ Settings.'); }
+    if (b.dataset.reread) rereadStore(b.dataset.reread);
+  };
 }
 async function share({ d, p }) {
   const text = `${p.label} at ${d.name} (${d.dist.toFixed(1)} mi): ${p.text}`;
@@ -234,8 +252,8 @@ function renderPlan() {
   const pay = B / (1 + (+S.tax || 0) / 100);
   const rows = DISPS.filter(d => !S.favonly || favs.has(d.id)).map(d => {
     const rewards = d.wallet.reduce((s, w) => s + (w.dollars || 0) + (w.points || 0) * (w.ppv || 0), 0);
-    const deals = d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && !(S.hidenew && p.newOnly) && matchesCat(p, S.cat));
-    const cand = (d.products || []).filter(x => matchesCat({ cats: x.cats || ['all'] }, S.cat))
+    const deals = d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && !(p.newOnly && shopped(d)) && !S.used?.[usedKey(d, p)] && matchesCat(p, S.cat) && !hidden(d, p));
+    const cand = (d.products || []).filter(x => matchesCat({ cats: x.cats || ['all'] }, S.cat) && !hidden(d, { text: x.name, brand: x.brand }) && !S.used?.[usedKey(d, { text: x.name })])
       .map(x => ({ ...x, pct: x.was ? 1 - x.price / x.was : 0, ppg: x.grams ? x.price / x.grams : null }))
       .sort((a, b) => (b.pct >= 0.01) - (a.pct >= 0.01) || b.pct - a.pct || (a.ppg ?? 1e9) - (b.ppg ?? 1e9) || a.price - b.price);
     const cart = [], names = new Set(); let spent = 0;
@@ -303,29 +321,93 @@ function banner() {
 
 function render() {
   save();
-  for (const t of ['deals', 'budget', 'wallet', 'places', 'map', 'add']) $('#t-' + t).classList.toggle('hide', S.tab !== t);
-  $('#tabs').innerHTML = [['deals', '🔥 Deals'], ['budget', '💵 Budget'], ['wallet', '🎁 Wallet'], ['places', '🏪 Places'], ['map', '🗺️ Map'], ['add', '➕ Add deal']].map(([k, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('');
+  for (const t of ['deals', 'budget', 'wallet', 'places', 'map', 'add', 'settings']) $('#t-' + t).classList.toggle('hide', S.tab !== t);
+  $('#tabs').innerHTML = [['deals', '🔥 Deals'], ['budget', '💵 Budget'], ['wallet', '🎁 Wallet'], ['places', '🏪 Stores'], ['map', '🗺️ Map'], ['add', '➕ Add deal'], ['settings', '⚙️ Settings']].map(([k, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('');
   $('#cats').innerHTML = ['all', ...CATS].map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-cat="${c}">${CAT_LABEL[c]}</button>`).join('');
   build(); banner();
   const v = visibleDeals(), sale = v.filter(x => x.p.score > 0).length, items = v.filter(x => x.p.item).length;
   const read = DISPS.filter(d => d.checked).length, withSite = DISPS.filter(d => d.website).length;
   toast(S.center ? `${DISPS.length} dispensaries within ${S.radius} mi of ${S.center.label} · ${read}/${withSite} websites read · ${sale} deals & sale items · ${items} products` : '');
-  ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual })[S.tab]();
+  renderSaved(); document.documentElement.style.zoom = (S.textSize || 100) / 100;
+  ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual, settings: renderSettings })[S.tab]();
 }
 
-let scanning = false;
+let scanning = false, pending = null, QS = '', rt2;
+const mergeLive = list => { const m = new Map(LIVE.map(d => [d.id, d])); for (const d of list) m.set(d.id, d); LIVE = [...m.values()]; };
+window.onSiteResult = list => { mergeLive(list); clearTimeout(rt2); rt2 = setTimeout(render, 250); };
 async function locate(center, force = false) {
-  if (scanning) return; scanning = true;
-  S.center = center; save(); toast(`Finding dispensaries near ${center.label}… (first scan of a new area can take a minute)`);
+  if (scanning) { pending = [center, force]; return; }
+  scanning = true;
+  S.center = center; save();
   try {
-    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree);
-    LIVE = r.dispensaries || []; DATA.updated = r.updated;
-    $('#updated').textContent = r.updated ? `deals read ${ago(r.updated)}` : '';
-    render();
+    const c = await api().cached(center.lat, center.lon, S.radius);   // instant: last results for this area
+    LIVE = c.dispensaries || []; render();
+    toast(`Showing saved results — reading ${S.agree ? '' : '(age-gated menus skipped) '}menus near ${center.label} for live prices…`);
+    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8);
+    LIVE = r.dispensaries || LIVE; DATA.updated = r.updated;
+    $('#updated').textContent = r.updated ? `menus read ${ago(r.updated)}` : '';
+    scanning = false; render();
     if (r.error) toast(r.error);
-  } finally { scanning = false; }
+  } finally {
+    scanning = false;
+    if (pending) { const [c, f] = pending; pending = null; locate(c, f); }
+  }
 }
-window.onScanProgress = (done, total) => toast(`Reading dispensary menus… ${done}/${total} sites done (each site takes up to a minute)`);
+async function rereadStore(host) {
+  if (!S.center) return;
+  toast('Re-reading that store’s menu…');
+  const r = await api().scan(S.center.lat, S.center.lon, S.radius, true, !!S.agree, host, 1);
+  mergeLive((r.dispensaries || []).filter(d => d.host === host)); render(); toast('Store menu refreshed.');
+}
+window.onScanProgress = (done, total) => { if (total) toast(`Reading menus… ${done}/${total} stores done — results fill in as each one finishes`); };
+setInterval(() => { if (S.bgRefresh !== false && S.center && !scanning) locate(S.center, false); }, 30 * 60 * 1000);
+
+function renderSaved() {
+  const pl = S.places || [];
+  $('#saved').innerHTML = pl.map((x, i) => `<button class="chip ${S.center && Math.abs(S.center.lat - x.center.lat) < 1e-3 && Math.abs(S.center.lon - x.center.lon) < 1e-3 ? 'on' : ''}" data-place="${i}">📍 ${esc(x.name)} · ${x.radius} mi</button>`).join('')
+    + (S.center ? `<button class="chip" id="saveplace">＋ Save this place</button>` : '');
+  const sp = $('#saveplace'); if (sp) sp.onclick = () => {
+    const name = prompt('Name this place (e.g. Home, Buddy RI):', S.center.label.split(',')[0]); if (!name) return;
+    S.places = [...pl.filter(x => x.name !== name), { name, center: S.center, radius: S.radius }]; render();
+  };
+  $('#saved').querySelectorAll('[data-place]').forEach(b => b.onclick = () => {
+    const x = pl[+b.dataset.place]; S.radius = x.radius; $('#radius').value = x.radius; $('#rv').textContent = x.radius; S.q = ''; $('#q').value = ''; locate(x.center);
+  });
+}
+
+function renderSettings() {
+  const stores = [...new Map(DISPS.map(d => [storeKey(d), d.name.replace(/\s*[-–].*$/, '')])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  for (const k of S.shopped || []) if (!stores.some(([x]) => x === k)) stores.push([k, k]);
+  const used = Object.entries(S.used || {});
+  $('#settings').innerHTML = `
+  <div class="card"><b>General</b>
+    <div class="row" style="margin-top:6px"><label><input type="checkbox" data-set="autoUpdate" ${S.autoUpdate !== false ? 'checked' : ''}> Install updates automatically when I open BudDeals</label></div>
+    <div class="row"><label><input type="checkbox" data-set="bgRefresh" ${S.bgRefresh !== false ? 'checked' : ''}> Re-read menus in the background every 30 minutes while open</label></div>
+    <div class="row"><label><input type="checkbox" data-set="agree" ${S.agree ? 'checked' : ''}> Answer dispensary “18+/21+ or patient” and “agree to terms” screens for me</label></div>
+    <div class="row"><label>Speed (menus read at once) <select data-set="workers">${[4, 8, 12].map(n => `<option ${+S.workers === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label>Text size <input type="range" min="80" max="140" step="5" value="${S.textSize || 100}" data-set="textSize"> <b>${S.textSize || 100}%</b></label></div>
+    <div class="row"><label>Sales tax % <input type="number" step="0.5" value="${S.tax || 0}" data-set="tax" style="width:80px"></label><label>Gas $/mile <input type="number" step="0.01" value="${S.gas ?? 0.15}" data-set="gas" style="width:90px"></label></div>
+  </div>
+  <div class="card"><b>Stores I've shopped at</b> <span class="meta">— first-time-customer deals are hidden for these</span>
+    <div style="columns:2;margin-top:6px">${stores.map(([k, n]) => `<label style="display:block"><input type="checkbox" data-shop="${esc(k)}" ${(S.shopped || []).includes(k) ? 'checked' : ''}> ${esc(n)}</label>`).join('') || '<span class="meta">Search an area first.</span>'}</div></div>
+  <div class="card"><b>Used deals</b> <span class="meta">— hidden everywhere</span>
+    ${used.length ? used.map(([k, v]) => `<div class="row" style="justify-content:space-between"><span class="meta">${esc(v.store)}: ${esc(v.label)}</span><button data-restore="${esc(k)}">Restore</button></div>`).join('') : '<div class="meta">None yet — hit “✓ Used” on any deal.</div>'}</div>
+  <div class="card"><b>Never show</b> <span class="meta">— brands, words or stores, one per line</span>
+    <textarea id="hidewords" placeholder="e.g.&#10;shake&#10;Some Brand">${esc((S.hide || []).join('\n'))}</textarea></div>
+  <div class="card"><b>Saved places</b>
+    ${(S.places || []).map((x, i) => `<div class="row" style="justify-content:space-between"><span>📍 ${esc(x.name)} · ${x.radius} mi</span><button data-delplace="${i}">Remove</button></div>`).join('') || '<div class="meta">Search somewhere, then click “＋ Save this place”.</div>'}</div>
+  <div class="card"><b>Data</b><div class="acts"><button id="clearcache">Clear saved menus (re-read everything)</button><button id="aexp2">Back up my settings</button></div>
+    <div class="meta" style="margin-top:6px">Everything is stored only on this PC. BudDeals v<span class="vv"></span></div></div>`;
+  api().version().then(v => $('#settings .vv').textContent = v);
+  const el = $('#settings');
+  el.querySelectorAll('[data-set]').forEach(i => i.onchange = () => { const k = i.dataset.set; S[k] = i.type === 'checkbox' ? i.checked : (i.type === 'range' || i.type === 'number' || i.tagName === 'SELECT') ? +i.value : i.value; render(); });
+  el.querySelectorAll('[data-shop]').forEach(i => i.onchange = () => { const k = i.dataset.shop; S.shopped = i.checked ? [...new Set([...(S.shopped || []), k])] : (S.shopped || []).filter(x => x !== k); save(); });
+  el.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { const u = { ...(S.used || {}) }; delete u[b.dataset.restore]; S.used = u; render(); });
+  el.querySelectorAll('[data-delplace]').forEach(b => b.onclick = () => { S.places = (S.places || []).filter((_, i) => i !== +b.dataset.delplace); render(); });
+  $('#hidewords').onchange = e => { S.hide = e.target.value.split('\n').map(x => x.trim()).filter(Boolean); save(); };
+  $('#clearcache').onclick = async () => { await api().clear_cache(); toast('Saved menus cleared.'); if (S.center) locate(S.center, true); };
+  $('#aexp2').onclick = () => $('#aexp').click();
+}
 async function search() {
   const q = $('#q').value.trim(); if (!q) return;
   toast('Looking up ' + q + '…');
@@ -342,6 +424,8 @@ document.addEventListener('click', e => {
   if (t.dataset.mdel) { manual.splice(+t.dataset.mdel, 1); ls.set('manual', manual); }
   render();
 });
+let qst; $('#qs').oninput = e => { clearTimeout(qst); qst = setTimeout(() => { QS = e.target.value.trim().toLowerCase(); render(); }, 150); };
+let tts; $('#q').addEventListener('input', e => { clearTimeout(tts); const v = e.target.value.trim(); if (/^\d{5}$/.test(v)) tts = setTimeout(search, 500); });
 $('#go').onclick = search; $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
 $('#geo').onclick = async () => {
   toast('Finding your location…');
@@ -353,7 +437,7 @@ $('#geo').onclick = async () => {
 };
 let rt; $('#radius').oninput = e => { S.radius = +e.target.value; $('#rv').textContent = S.radius; clearTimeout(rt); rt = setTimeout(() => S.center && locate(S.center), 600); };
 $('#sort').onchange = e => { S.sort = e.target.value; render(); };
-for (const id of ['today', 'hidenew', 'favonly']) $('#' + id).onchange = e => { S[id] = e.target.checked; render(); };
+for (const id of ['favonly']) $('#' + id).onchange = e => { S[id] = e.target.checked; render(); };
 for (const id of ['budget', 'tax', 'gas']) $('#' + id).oninput = e => { S[id] = e.target.value; render(); };
 
 $('#atext').oninput = () => { const p = parseDeal($('#atext').value); $('#apreview').textContent = $('#atext').value ? `Reads as: ${p.label} · ${p.cats.map(c => CAT_LABEL[c]).join(', ')}${p.days ? ' · ' + p.days.map(dayName).join('/') : ''}` : ''; };
@@ -390,6 +474,10 @@ $('#wclear').onclick = async () => toast((await api().clear_logins()) ? 'Signed 
 $('#refresh').onclick = () => S.center ? locate(S.center, true) : toast('Pick a location first');
 async function checkUpdate() {
   const u = await api().check_update(); if (!u) return;
+  if (S.autoUpdate !== false) {
+    $('#update').innerHTML = `<div class="banner">⬆️ Updating BudDeals to ${esc(u.version)}… it will reopen by itself in a few seconds.</div>`;
+    const r = await api().install_update(); if (r.error) { $('#update').innerHTML = `<div class="banner">Update failed: ${esc(r.error)}</div>`; } return;
+  }
   $('#update').innerHTML = `<div class="banner">⬆️ BudDeals ${esc(u.version)} is available. <button class="pri" id="upd">Update now</button> <button id="updlater">Later</button>${u.notes ? `<div class="meta" style="margin-top:6px;white-space:pre-wrap">${esc(u.notes)}</div>` : ''}</div>`;
   $('#upd').onclick = async () => { toast('Downloading update…'); const r = await api().install_update(); if (r.error) toast(r.error); };
   $('#updlater').onclick = () => { $('#update').innerHTML = ''; };
@@ -397,7 +485,7 @@ async function checkUpdate() {
 
 // ---------- start ----------
 $('#q').value = S.q || ''; $('#radius').value = S.radius; $('#rv').textContent = S.radius; $('#sort').value = S.sort;
-$('#today').checked = S.today; $('#hidenew').checked = S.hidenew; $('#favonly').checked = S.favonly;
+$('#favonly').checked = S.favonly;
 $('#budget').value = S.budget; $('#tax').value = S.tax; $('#gas').value = S.gas;
 $('#updated').textContent = '';
 api().version().then(v => { $('#ver').textContent = ' · BudDeals v' + v; });

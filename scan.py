@@ -14,7 +14,7 @@ DATA_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "B
 CACHE_FILE = os.path.join(DATA_DIR, "cache.json")
 APP_UA = "BudDeals/1.0 (personal dispensary deal finder; Windows desktop app)"
 PAGE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 BudDeals/1.0"
-SITE_TTL = 3 * 3600          # re-read a dispensary's site after 3 hours
+SITE_TTL = 15 * 60           # re-read a dispensary's menu if older than 15 minutes when you search
 AREA_TTL = 7 * 24 * 3600     # dispensary list for an area is good for a week
 OVERPASS = [
     "https://overpass-api.de/api/interpreter",
@@ -272,16 +272,30 @@ def _product(x, src):
     cats = cats_of(name)
     if cats == ["all"]:
         cats = cats_of(urllib.parse.unquote(urllib.parse.urlparse(src).path).replace("-", " ").replace("/", " "))
-    return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats,
-            "grams": grams_of(name) or grams_of(str(x.get("size") or "")), "src": src}
+    try:
+        thc = float(x.get("thc") or 0) or None
+    except (TypeError, ValueError):
+        thc = None
+    try:
+        mg = float(x.get("mg") or 0) or None
+    except (TypeError, ValueError):
+        mg = None
+    grams = grams_of(name) or grams_of(str(x.get("size") or ""))
+    mg_thc = mg or (grams * 10 * thc if grams and thc and thc < 100 else None)  # g * 1000 mg * thc%/100
+    return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats, "grams": grams,
+            "thc": thc, "mgThc": round(mg_thc) if mg_thc else None, "brand": str(x.get("brand") or "")[:60],
+            "type": str(x.get("strain") or "")[:20], "src": src}
 
 
-def read_site(website, reader=None, ctx=None):
-    """reader(url) -> {url, lines, items, links} from a real (hidden) browser; falls back to a plain download."""
+def read_site(website, reader=None, ctx=None, known_pages=None):
+    """reader(url, ctx) -> {url, lines, items, links} from a real (hidden) browser; falls back to a plain download.
+    known_pages: pages that had products last time — read those directly instead of discovering again."""
     base = website if re.match(r"https?:", website, re.I) else "https://" + website
-    pages, seen, deals, products, ok = [base], set(), [], [], False
+    start = list(dict.fromkeys(known_pages or [])) or [base]
+    pages, seen, deals, products, ok, useful = start[:], set(), [], [], False, []
+    limit = max(len(start), 9 if reader else 4)
     i = 0
-    while i < len(pages) and i < (9 if reader else 4):
+    while i < len(pages) and i < limit:
         url = pages[i]
         i += 1
         if url in seen:
@@ -301,62 +315,119 @@ def read_site(website, reader=None, ctx=None):
                 ok = True
                 r = extract(raw.decode("utf-8", "replace"), final)
                 lines, links = r["deals"], r["links"]
-                prods = [{**p, "was": None, "grams": grams_of(p["name"]), "src": final} for p in r["products"]]
+                prods = [p for p in (_product({**x, "size": ""}, final) for x in r["products"]) if p]
             deals += [{"text": t, "src": final} for t in lines]
             products += prods
-            if len(seen) == 1:
-                pages += links[:8] if reader else links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")]
+            if prods or lines:
+                useful.append(url)
+            if len(seen) == 1 and not known_pages:
+                pages += links[:8] if reader else (links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")])
         except Exception:
             pass
+    if known_pages and ok and not products and not deals:
+        return read_site(website, reader, ctx)  # the site changed; discover its pages again
     uniq = list({d["text"].lower(): d for d in deals}.values())[:30]
     prods = list({(p["name"].lower(), p["price"]): p for p in products}.values())[:600]
-    return ok, {"t": time.time(), "deals": uniq, "products": prods}
+    return ok, {"t": time.time(), "deals": uniq, "products": prods, "pages": useful[:9]}
 
 
-def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False):
-    with _lock:
-        cache = _load()
+def _history(cache, host, products):
+    """Keeps each product's lowest price per day (60 days) and adds: low30, typical, days seen, lowest-now, inflated sale."""
+    hist = cache.setdefault("hist", {})
+    today = time.strftime("%Y-%m-%d")
+    cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - 60 * 86400))
+    month = time.strftime("%Y-%m-%d", time.localtime(time.time() - 30 * 86400))
+    for p in products:
+        k = f"{host}|{p['name'].lower()}"
+        h = {d: v for d, v in hist.get(k, {}).items() if d >= cutoff}
+        h[today] = min(h.get(today, 1e9), p["price"])
+        hist[k] = h
+        last30 = [v for d, v in h.items() if d >= month]
+        vals = sorted(h.values())
+        p["low30"] = min(last30)
+        p["typical"] = vals[len(vals) // 2]
+        p["daysSeen"] = len(h)
+        p["isLow"] = len(h) >= 3 and p["price"] <= p["low30"] and p["price"] < vals[-1]
+        # "was $X" but we've never seen it anywhere near $X, and today's price is just the usual price
+        p["inflated"] = bool(p.get("was") and len(h) >= 5 and p["was"] > max(vals) * 1.15 and p["price"] >= p["typical"])
+
+
+def _out(disps, cache):
+    out = []
+    for d in disps:
+        h = host_of(d["website"]) if d["website"] else ""
+        s = cache["sites"].get(h, {}) if h else {}
+        out.append({**{k: v for k, v in d.items() if not k.startswith("_")}, "host": h, "deals": s.get("deals", []),
+                    "products": s.get("products", []), "stale": s.get("stale", False),
+                    "checked": datetime.fromtimestamp(s["t"], timezone.utc).isoformat() if s.get("t") else None})
+    return out
+
+
+def _area_disps(lat, lon, miles, cache, force):
     disps, note = dispensaries(lat, lon, miles, cache, force)
     for d in disps:
         if not d["website"]:
             d["website"] = next((u for rx, u in CHAIN_SITES if re.search(rx, d["name"], re.I)), "")
-    area = area_of(lat, lon) if reader else {}
-    for d in disps:
         d["_dist"] = (d["lat"] - lat) ** 2 + (d["lon"] - lon) ** 2
+    if not disps and not note:
+        note = "No dispensaries found on the map within this radius. Try a bigger radius."
+    return disps, note
+
+
+def cached(lat, lon, miles):
+    """Instant: whatever was read before for this area (only goes online if the area's store list isn't known yet)."""
+    with _lock:
+        cache = _load()
+    disps, note = _area_disps(lat, lon, miles, cache, False)
+    with _lock:
+        c2 = _load()
+        c2["areas"].update(cache["areas"])
+        _save(c2)
+    return {"dispensaries": _out(disps, cache), "updated": None, "error": note}
+
+
+def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, on_site=None, only_host=None, workers=8):
+    with _lock:
+        cache = _load()
+    disps, note = _area_disps(lat, lon, miles, cache, False)
+    area = area_of(lat, lon) if reader else {}
     sites, ctxs = {}, {}
     for d in sorted(disps, key=lambda x: x["_dist"]):
         h = host_of(d["website"]) if d["website"] else ""
         if h and h not in sites:
             sites[h] = d["website"]
             ctxs[h] = {**area, "city": d.get("city") or area.get("city", ""), "agree": agree}
-    todo = [(h, w) for h, w in sites.items() if force or time.time() - cache["sites"].get(h, {}).get("t", 0) > SITE_TTL]
+    if only_host:
+        todo = [(h, w) for h, w in sites.items() if h == only_host]
+    else:
+        todo = [(h, w) for h, w in sites.items() if force or time.time() - cache["sites"].get(h, {}).get("t", 0) > SITE_TTL]
     done = 0
-    if progress and todo:
+    if progress:
         progress(0, len(todo))
-    with cf.ThreadPoolExecutor(max_workers=3 if reader else 8) as pool:
-        futs = {pool.submit(read_site, w, reader, ctxs.get(h)): h for h, w in todo}
+    with cf.ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo) or 1)) if reader else 8) as pool:
+        futs = {pool.submit(read_site, w, reader, ctxs.get(h), cache["sites"].get(h, {}).get("pages")): h for h, w in todo}
         for f in cf.as_completed(futs):
             h = futs[f]
             try:
                 ok, data = f.result()
             except Exception:
                 ok, data = False, {"t": time.time(), "deals": [], "products": []}
-            old = cache["sites"].get(h, {})
-            if ok or not (old.get("deals") or old.get("products")):
-                cache["sites"][h] = data
-            else:
-                old["stale"] = True
+            with _lock:
+                old = cache["sites"].get(h, {})
+                if ok or not (old.get("deals") or old.get("products")):
+                    _history(cache, h, data["products"])
+                    cache["sites"][h] = data
+                else:
+                    old["stale"] = True
             done += 1
+            if on_site:
+                on_site(_out([d for d in disps if host_of(d["website"] or "") == h], cache))
             if progress:
                 progress(done, len(todo))
-    out = []
-    for d in disps:
-        s = cache["sites"].get(host_of(d["website"]), {}) if d["website"] else {}
-        d.pop("_dist", None)
-        out.append({**d, "deals": s.get("deals", []), "products": s.get("products", []), "stale": s.get("stale", False),
-                    "checked": datetime.fromtimestamp(s["t"], timezone.utc).isoformat() if s.get("t") else None})
     with _lock:
-        _save(cache)
-    if not disps and not note:
-        note = "No dispensaries found on the map within this radius. Try a bigger radius."
-    return {"dispensaries": out, "updated": datetime.now(timezone.utc).isoformat(), "error": note, "sitesRead": len(sites)}
+        c2 = _load()  # merge in case another scan saved meanwhile
+        c2["areas"].update(cache["areas"])
+        c2["sites"].update({h: cache["sites"][h] for h, _ in todo if h in cache["sites"]})
+        c2.setdefault("hist", {}).update(cache.get("hist", {}))
+        _save(c2)
+    return {"dispensaries": _out(disps, cache), "updated": datetime.now(timezone.utc).isoformat(), "error": note, "sitesRead": len(sites)}
