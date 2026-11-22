@@ -61,7 +61,7 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
   <div id="update"></div>
   <div id="banner"></div>
   <div class="status" id="status"></div>
-  <section id="t-deals"><div class="grid" id="deals"></div></section>
+  <section id="t-deals"><div class="acts" style="margin:-4px 0 10px"><button id="sharetop">📤 Share top 10 deals</button></div><div class="grid" id="deals"></div></section>
   <section id="t-budget" class="hide">
     <div class="form">
       <div class="row">
@@ -95,6 +95,11 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
     </div>
     <div class="grid" id="wallet" style="margin-top:12px"></div>
   </section>
+  <section id="t-list" class="hide">
+    <div class="form"><label>What do you want? One item per line — I'll find the cheapest store for the whole list, and whether splitting between two stores is worth the drive.
+      <textarea id="shoplist" placeholder="eighth of blue dream&#10;1g live resin cart&#10;gummies&#10;pre-roll"></textarea></label><button class="pri" id="listgo">Find the cheapest way</button></div>
+    <div class="grid" id="listres" style="margin-top:12px"></div></section>
+  <section id="t-spend" class="hide"><div id="spend" class="form" style="max-width:760px"></div></section>
   <section id="t-settings" class="hide"><div id="settings" class="form" style="max-width:760px"></div></section>
   <section id="t-places" class="hide"><div class="grid" id="places"></div></section>
   <section id="t-map" class="hide"><div id="map"></div></section>
@@ -118,7 +123,7 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
 </footer>
 
 <script type="module">
-import { CATS, CAT_LABEL, parseDeal, parseRewards, appliesToday, matchesCat, retailFor } from './js/dealparse.mjs';
+import { CATS, CAT_LABEL, parseDeal, parseRewards, appliesToday, matchesCat, retailFor, catsOf } from './js/dealparse.mjs';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -130,7 +135,7 @@ const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, {
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const _UNUSED = 'dispensar|cannabis|marijuana|weed|Trulieve|Curaleaf|Sunnyside|Liberty Health|Fluent|M[UÜ]V|Surterra|Vidacann|Insa|RISE|Zen Leaf|AYR|GrowHealthy|Jungle Boys|Sanctuary|Flowery|Green Dragon|Cookies|Planet 13|Thrive|Cannabist|Beyond Hello|Verilife|Story Cannabis|Gold Flora';
 
-const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals', shopped: [], used: {}, hide: [], places: [], textSize: 100, autoUpdate: true, bgRefresh: true, workers: 8, tray: true, watch: [], alerted: {}, digest: '09:00', lastDigest: '' }, ls.get('settings', {}));
+const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals', shopped: [], used: {}, hide: [], places: [], textSize: 100, autoUpdate: true, bgRefresh: true, workers: 8, tray: true, watch: [], alerted: {}, digest: '09:00', lastDigest: '', shopList: '', purchases: [], monthly: 0, allotment: 70, stack: false }, ls.get('settings', {}));
 const P = new URLSearchParams(location.search);
 if (P.get('q')) { S.q = P.get('q'); S.center = null; }
 if (P.get('r')) S.radius = +P.get('r');
@@ -210,7 +215,7 @@ function renderDeals() {
   const list = visibleDeals(), budget = +S.budget || 0;
   $('#deals').innerHTML = list.length ? list.slice(0, 300).map(({ d, p }, i) => `
     <div class="card">${star(d)}
-      <span class="rank">#${i + 1}</span><span class="badge">${esc(p.label)}</span>
+      <span class="rank">#${i + 1}</span>${gradeBadge(p, d)}<span class="badge">${esc(p.label)}</span>
       <div>${p.cats.map(c => `<span class="tag">${esc(CAT_LABEL[c])}</span>`).join('')}
         ${p.days ? `<span class="tag today">${p.days.map(dayName).join('/')}${appliesToday(p) ? ' · today' : ''}</span>` : ''}
         ${p.yours ? '<span class="tag you">YOUR OFFER</span>' : ''}${p.manual ? '<span class="tag">added by you</span>' : ''}
@@ -221,10 +226,11 @@ function renderDeals() {
         ${d.stale ? '<span class="tag warn">site didn’t load last scan</span>' : ''}</div>
       <div class="dtext">${p.item ? `<b>${esc(p.text)}</b>${p.brand ? ` <span class="meta">${esc(p.brand)}</span>` : ''}<br>${money(p.price)}${p.was ? ` <s style="color:var(--dim)">${money(p.was)}</s>` : ''}${p.ppg ? ` · ${money(p.ppg)}/g` : ''}${p.thc ? ` · ${p.thc}% THC` : ''}${p.p100 ? ` · ${money(p.p100)}/100mg THC` : ''}${p.type ? ` · ${esc(p.type)}` : ''}${p.pct < 0.01 ? ' <span class="tag">regular price</span>' : ''}` : esc(p.text)}</div>
       <div class="meta"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
-      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">Source</a>` : ''}<button data-share="${i}">Share</button><button data-used="${i}" title="Hide this deal (already used it)">✓ Used</button>${p.item ? `<button data-watch="${i}" title="Alert me when this goes on sale">👁 Watch</button>` : ''}${d.host ? `<button data-reread="${esc(d.host)}" title="Read this store's menu again now">↻ Re-read</button>` : ''}</div>
+      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">${p.item ? '🛒 View / order' : 'Source'}</a>` : ''}${p.item ? `<button data-compare="${i}">⇄ Compare stores</button>` : ''}<button data-share="${i}">Share</button><button data-used="${i}" title="Hide this deal (already used it)">✓ Used</button>${p.item ? `<button data-watch="${i}" title="Alert me when this goes on sale">👁 Watch</button>` : ''}${d.host ? `<button data-reread="${esc(d.host)}" title="Read this store's menu again now">↻ Re-read</button>` : ''}</div>
     </div>`).join('') : `<div class="card">No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found for today within ${S.radius} mi${QS ? ` matching “${esc(QS)}”` : ''}. ${scanning ? 'Still reading menus — results appear as each store finishes.' : 'Try a bigger radius, hit 🔄 Refresh, or check the <b>Stores</b> tab.'}</div>`;
   $('#deals').onclick = e => {
-    const b = e.target.closest('[data-share],[data-used],[data-reread],[data-watch]'); if (!b) return;
+    const b = e.target.closest('[data-share],[data-used],[data-reread],[data-watch],[data-compare]'); if (!b) return;
+    if (b.dataset.compare) return compare(list[+b.dataset.compare].p);
     if (b.dataset.watch) { const { p } = list[+b.dataset.watch]; addWatch(p.text.replace(/\s*\d+(\.\d+)?\s?(g|mg)\b.*$/i, '').trim() || p.text, null); }
     if (b.dataset.share) share(list[+b.dataset.share]);
     if (b.dataset.used) { const { d, p } = list[+b.dataset.used]; S.used = { ...(S.used || {}), [usedKey(d, p)]: { at: new Date().toISOString(), label: `${p.label} — ${p.text}`.slice(0, 140), store: d.name } }; render(); toast('Marked as used. Restore it in ⚙️ Settings.'); }
@@ -243,6 +249,7 @@ function renderPlaces() {
       ${d.hours ? `<div class="meta">🕒 ${esc(d.hours)}</div>` : ''}
       <div class="meta">${today ? `<span class="tag today">${today} deal${today > 1 ? 's' : ''} today</span>` : d.website ? 'No deals read from their site — check the menu' : 'No website listed'}
       ${d.wallet.length ? '<span class="tag you">in your wallet</span>' : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
+      ${bestDays(d)}
       ${prods.length ? `<table>${prods.map(x => `<tr><td>${esc(x.name)}</td><td style="text-align:right">${money(x.price)}</td></tr>`).join('')}</table>` : ''}
       <div class="acts">${links(d)}</div></div>`;
   }).join('') || '<div class="card">No dispensaries found in this radius. Try a larger radius.</div>';
@@ -275,7 +282,7 @@ function renderPlan() {
   $('#plan').innerHTML = rows.length ? rows.slice(0, 40).map((r, i) => `<div class="card">${star(r.d)}<span class="rank">#${i + 1}</span><b>${esc(r.d.name)}</b> <span class="meta">${r.d.dist.toFixed(1)} mi</span>
     ${r.cart.length ? `<div style="margin:6px 0"><span class="big">${r.cart.length} items · ${money(r.spent)}</span><br><span class="meta">normally ${money(r.worth)} — you save <b style="color:var(--acc)">${money(r.worth - r.spent)}</b>${S.tax > 0 ? ' (before tax)' : ''}</span></div>
       <table>${r.cart.map(x => `<tr><td>${esc(x.name)}${x.grams ? ` <span class="meta">${x.grams}g</span>` : ''}</td><td style="text-align:right;white-space:nowrap">${money(x.price)}${x.was ? ` <s class="meta">${money(x.was)}</s>` : ''}</td></tr>`).join('')}</table>
-      ${r.best ? `<div class="meta" style="margin-top:6px">Also ask about: <b>${esc(r.best.label)}</b> — ${esc(r.best.text)} (may not stack with sale prices)</div>` : ''}`
+      ${r.best ? `<div class="meta" style="margin-top:6px">Also ask about: <b>${esc(r.best.label)}</b> — ${esc(r.best.text)}${stackLine(r)}</div>` : ''}`
     : `<div style="margin:6px 0"><span class="big">${money(r.worth)}</span> <span class="meta">of product for ${money(B)}</span></div>${r.best ? `<div class="dtext">Using: <b>${esc(r.best.label)}</b> — ${esc(r.best.text)}</div>` : ''}<div class="meta">No menu prices read for this store — open its menu to pick items.</div>`}
     ${r.rewards ? `<div class="meta">+ ${money(r.rewards)} from your rewards/points</div>` : ''}
     <div class="meta">Gas ~${money(r.gas)} · <b style="color:${r.net >= 0 ? 'var(--acc)' : 'var(--bad)'}">net savings ${money(r.net)}</b></div>
@@ -323,15 +330,15 @@ function banner() {
 
 function render() {
   save();
-  for (const t of ['deals', 'budget', 'wallet', 'places', 'map', 'add', 'settings']) $('#t-' + t).classList.toggle('hide', S.tab !== t);
-  $('#tabs').innerHTML = [['deals', '🔥 Deals'], ['budget', '💵 Budget'], ['wallet', '🎁 Wallet'], ['places', '🏪 Stores'], ['map', '🗺️ Map'], ['add', '➕ Add deal'], ['settings', '⚙️ Settings']].map(([k, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('');
+  for (const t of ['deals', 'budget', 'wallet', 'places', 'map', 'add', 'settings', 'list', 'spend']) $('#t-' + t).classList.toggle('hide', S.tab !== t);
+  $('#tabs').innerHTML = [['deals', '🔥 Deals'], ['budget', '💵 Budget'], ['wallet', '🎁 Wallet'], ['places', '🏪 Stores'], ['map', '🗺️ Map'], ['list', '🧾 List'], ['spend', '📒 Spending'], ['add', '➕ Add deal'], ['settings', '⚙️ Settings']].map(([k, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('');
   $('#cats').innerHTML = ['all', ...CATS].map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-cat="${c}">${CAT_LABEL[c]}</button>`).join('');
   build(); banner();
   const v = visibleDeals(), sale = v.filter(x => x.p.score > 0).length, items = v.filter(x => x.p.item).length;
   const read = DISPS.filter(d => d.checked).length, withSite = DISPS.filter(d => d.website).length;
   toast(S.center ? `${DISPS.length} dispensaries within ${S.radius} mi of ${S.center.label} · ${read}/${withSite} websites read · ${sale} deals & sale items · ${items} products` : '');
   renderSaved(); document.documentElement.style.zoom = (S.textSize || 100) / 100;
-  ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual, settings: renderSettings })[S.tab]();
+  ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual, settings: renderSettings, list: renderList, spend: renderSpend })[S.tab]();
 }
 
 let scanning = false, pending = null, QS = '', rt2;
@@ -414,6 +421,117 @@ async function showQR(text) {
   document.body.appendChild(o);
 }
 
+// ---------- phase 3: grades, compare, best day, stacking, shopping list, spending ----------
+function catPPG(cat) {  // area's typical $/g for a category, for grading regular prices
+  const v = DISPS.flatMap(d => d.parsed.filter(p => p.item && p.ppg && p.cats.includes(cat)).map(p => p.ppg)).sort((a, b) => a - b);
+  return v.length >= 5 ? v : null;
+}
+function grade(p) {
+  if (p.inflated) return ['D', 'The “was” price looks made up — this is its usual price'];
+  if (!p.item) return p.score >= 0.4 ? ['A', 'Big store deal'] : p.score >= 0.25 ? ['B', 'Solid store deal'] : p.score >= 0.12 ? ['C', 'Small store deal'] : ['D', 'Minor deal'];
+  const pct = p.pct || 0;
+  if (pct >= 0.4 || (pct >= 0.3 && p.isLow)) return ['A', `${Math.round(pct * 100)}% off${p.isLow ? ', lowest in 30 days' : ''}`];
+  if (pct >= 0.25) return ['B', `${Math.round(pct * 100)}% off`];
+  const v = p.ppg && p.cats[0] && catPPG(p.cats[0]);
+  if (v) { const rank = v.findIndex(x => x >= p.ppg) / v.length; if (rank <= 0.1) return ['A', 'Among the cheapest per gram nearby']; if (rank <= 0.3) return ['B', 'Cheaper per gram than most nearby']; if (rank <= 0.6) return ['C', 'About average per gram']; return ['D', 'Pricier per gram than most nearby']; }
+  return pct >= 0.1 ? ['C', `${Math.round(pct * 100)}% off`] : ['C', 'Regular price'];
+}
+const GCOL = { A: '#5ee08a', B: '#a7e05e', C: '#ffd54a', D: '#ff9f5a' };
+const gradeBadge = p => { const [g, why] = grade(p); return `<span title="${esc(why)}" style="display:inline-block;min-width:22px;text-align:center;font-weight:800;border-radius:6px;margin-right:6px;padding:0 5px;color:#06210f;background:${GCOL[g]}">${g}</span>`; };
+const baseName = n => norm(String(n).replace(/\b\d+(\.\d+)?\s?(g|mg|oz)\b|\b1\/8\b|\b1\/4\b|single|pre-?roll|whole flower|minis?|smalls/gi, ''));
+function compare(p0) {
+  const k = baseName(p0.text), rows = [];
+  for (const d of DISPS) for (const p of d.parsed) if (p.item && baseName(p.text) === k) rows.push({ d, p });
+  rows.sort((a, b) => (a.p.ppg ?? a.p.price) - (b.p.ppg ?? b.p.price));
+  const o = document.createElement('div');
+  o.style.cssText = 'position:fixed;inset:0;background:#000c;z-index:99;display:grid;place-items:center;padding:20px';
+  o.innerHTML = `<div class="card" style="max-width:640px;width:100%;max-height:80vh;overflow:auto"><b>⇄ ${esc(p0.text)} — every store</b>
+    <table style="margin-top:8px">${rows.map(({ d, p }) => `<tr><td>${esc(d.name)} <span class="meta">${d.dist.toFixed(1)} mi</span><br><span class="meta">${esc(p.text)}</span></td><td style="text-align:right;white-space:nowrap">${money(p.price)}${p.was ? ` <s class="meta">${money(p.was)}</s>` : ''}${p.ppg ? `<br><span class="meta">${money(p.ppg)}/g</span>` : ''}</td></tr>`).join('')}</table>
+    ${rows.length < 2 ? '<div class="meta">Only one store carries this right now.</div>' : ''}<div class="acts"><button class="pri">Close</button></div></div>`;
+  o.onclick = e => { if (e.target === o || e.target.tagName === 'BUTTON') o.remove(); };
+  document.body.appendChild(o);
+}
+function bestDays(d) {
+  const byDay = {};
+  for (const p of d.parsed) if (!p.item && p.days && !p.expired) for (const day of p.days) if (!byDay[day] || p.score > byDay[day].score) byDay[day] = p;
+  const e = Object.entries(byDay).sort((a, b) => b[1].score - a[1].score).slice(0, 3);
+  return e.length ? `<div class="meta">📅 Best days: ${e.map(([day, p]) => `<b>${dayName(+day)}</b> (${esc(p.label)}${p.cats[0] !== 'all' ? ' ' + CAT_LABEL[p.cats[0]].toLowerCase() : ''})`).join(', ')}</div>` : '';
+}
+function stackLine(r) {
+  const b = r.best; if (!b || !r.cart.length) return '';
+  const after = b.kind === 'tier' ? (r.spent >= b.threshold ? r.spent * (1 - b.pct) : null) : b.kind === 'pct' ? r.spent * (1 - b.pct) : null;
+  return after != null ? `<br>If it stacks on sale prices, this cart would be <b>${money(after)}</b> (ask before you order).` : b.threshold ? `<br>Your cart is under the ${money(b.threshold)} needed for it.` : '';
+}
+async function shareTop() {
+  const top = visibleDeals().slice(0, 10);
+  const txt = `🌿 Top deals near ${S.center ? S.center.label : 'me'} (${new Date().toLocaleDateString()}):\n` + top.map(({ d, p }, i) => `${i + 1}. ${p.label}${p.item ? ' ' + p.text + ' ' + money(p.price) : ' — ' + p.text} @ ${d.name} (${d.dist.toFixed(1)} mi)`).join('\n');
+  try { if (navigator.share) await navigator.share({ text: txt }); else { await navigator.clipboard.writeText(txt); toast('Top 10 copied — paste it to your friend.'); } } catch {}
+}
+function matchLine(line, p) {
+  const words = line.toLowerCase().replace(/\b(of|a|an|the|some|any|pack|please)\b/g, ' ').split(/\s+/).filter(Boolean);
+  const want = catsOf(line), g = (line.match(/(\d+(\.\d+)?)\s*g\b/i) || [])[1] ? +line.match(/(\d+(\.\d+)?)\s*g\b/i)[1] : /eighth|1\/8/i.test(line) ? 3.5 : /quarter|1\/4/i.test(line) ? 7 : /half/i.test(line) ? 14 : /ounce|\boz\b/i.test(line) ? 28 : null;
+  if (!want.includes('all') && !want.some(c => p.cats.includes(c))) return false;
+  if (g && p.grams && Math.abs(p.grams - g) > 0.6) return false;
+  const hay = `${p.text} ${p.brand || ''} ${p.type || ''}`.toLowerCase();
+  const generic = /^(eighths?|quarters?|half|ounces?|oz|grams?|g|flower|carts?|cartridges?|vapes?|pre-?rolls?|joints?|gumm(y|ies)|edibles?|concentrates?|wax|rosin|live|resin|disposables?|\d+(\.\d+)?g?|1\/8|1\/4)$/;
+  return words.filter(w => !generic.test(w)).every(w => hay.includes(w));
+}
+function renderList() {
+  $('#shoplist').value = S.shopList || '';
+  const lines = (S.shopList || '').split('\n').map(x => x.trim()).filter(Boolean);
+  if (!lines.length) { $('#listres').innerHTML = '<div class="card">Type what you want above, one per line.</div>'; return; }
+  const gasRate = +S.gas || 0, C = S.center;
+  const stores = DISPS.filter(d => (d.products || []).length).map(d => {
+    const picks = lines.map(l => d.parsed.filter(p => p.item && matchLine(l, p)).sort((a, b) => a.price - b.price)[0] || null);
+    return { d, picks, have: picks.filter(Boolean).length, total: picks.reduce((s, p) => s + (p ? p.price : 0), 0) };
+  }).filter(x => x.have);
+  if (!stores.length) { $('#listres').innerHTML = '<div class="card">None of those were found on the menus read so far. Try simpler words (e.g. “cart”, “eighth”, “gummies”) or hit 🔄 Refresh.</div>'; return; }
+  stores.sort((a, b) => b.have - a.have || (a.total + 2 * a.d.dist * gasRate) - (b.total + 2 * b.d.dist * gasRate));
+  const best = stores[0];
+  let split = null;
+  for (let i = 0; i < Math.min(stores.length, 12); i++) for (let j = i + 1; j < Math.min(stores.length, 12); j++) {
+    const A = stores[i], B = stores[j];
+    const picks = lines.map((_, k) => { const a = A.picks[k], b = B.picks[k]; return a && (!b || a.price <= b.price) ? { p: a, d: A.d } : b ? { p: b, d: B.d } : null; });
+    const have = picks.filter(Boolean).length, total = picks.reduce((s, x) => s + (x ? x.p.price : 0), 0);
+    const miles = C ? A.d.dist + hav(A.d.lat, A.d.lon, B.d.lat, B.d.lon) + B.d.dist : 0, cost = total + miles * gasRate;
+    if (have > best.have || (have === best.have && cost < best.total + 2 * best.d.dist * gasRate - 1 && (!split || cost < split.cost))) split = { A, B, picks, have, total, cost, miles };
+  }
+  const tripUrl = sp => C ? `https://www.google.com/maps/dir/?api=1&origin=${C.lat},${C.lon}&destination=${C.lat},${C.lon}&waypoints=${sp.A.d.lat},${sp.A.d.lon}|${sp.B.d.lat},${sp.B.d.lon}` : '#';
+  const row = (l, p, d) => `<tr><td>${esc(l)}<br><span class="meta">${p ? esc(p.text) + (d ? ' @ ' + esc(d.name) : '') : '❌ not on this menu'}</span></td><td style="text-align:right;white-space:nowrap">${p ? money(p.price) + (p.was ? ` <s class="meta">${money(p.was)}</s>` : '') : ''}</td></tr>`;
+  $('#listres').innerHTML = `<div class="card"><b>🏆 Best single store: ${esc(best.d.name)}</b> <span class="meta">${best.d.dist.toFixed(1)} mi</span>
+      <div class="big" style="margin:6px 0">${money(best.total)}</div><span class="meta">${best.have}/${lines.length} items · gas ~${money(2 * best.d.dist * gasRate)}</span>
+      <table>${lines.map((l, k) => row(l, best.picks[k])).join('')}</table><div class="acts">${links(best.d)}</div></div>
+    ${split ? `<div class="card"><b>🚗 Split between 2 stores</b><div class="big" style="margin:6px 0">${money(split.total)}</div>
+      <span class="meta">${split.have}/${lines.length} items · ${split.miles.toFixed(1)} mi round trip · ${split.have > best.have ? `gets ${split.have} of your items (one store only has ${best.have})` : `saves ${money(best.total + 2 * best.d.dist * gasRate - split.cost)} after gas`}</span>
+      <table>${lines.map((l, k) => row(l, split.picks[k]?.p, split.picks[k]?.d)).join('')}</table>
+      <div class="acts"><a target="_blank" rel="noopener" href="${tripUrl(split)}">🗺️ Route both stops</a></div></div>` : ''}
+    ${stores.slice(1, 6).map(x => `<div class="card"><b>${esc(x.d.name)}</b> <span class="meta">${x.d.dist.toFixed(1)} mi</span><div class="big" style="margin:6px 0">${money(x.total)}</div><span class="meta">${x.have}/${lines.length} items</span></div>`).join('')}`;
+}
+function renderSpend() {
+  const P = S.purchases || [], now = new Date(), ym = now.toISOString().slice(0, 7);
+  const month = P.filter(x => x.date.startsWith(ym)).reduce((s, x) => s + x.amount, 0);
+  const cut = new Date(now - 35 * 864e5).toISOString().slice(0, 10);
+  const flower = P.filter(x => x.date >= cut).reduce((s, x) => s + (x.flowerG || 0), 0);
+  const allot = +S.allotment || 0;
+  const months = [...Array(6)].map((_, i) => { const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1); const k = d.toISOString().slice(0, 7); return [d.toLocaleString(undefined, { month: 'short' }), P.filter(x => x.date.startsWith(k)).reduce((s, x) => s + x.amount, 0)]; });
+  const mx = Math.max(1, ...months.map(m => m[1]));
+  $('#spend').innerHTML = `<div class="card"><b>This month</b><div class="big">${money(month)}${S.monthly ? ` <span class="meta">of ${money(+S.monthly)}</span>` : ''}</div>
+      ${S.monthly ? `<div style="height:8px;background:#22352a;border-radius:99px;margin:6px 0"><div style="height:8px;width:${Math.min(100, month / S.monthly * 100)}%;background:${month > S.monthly ? 'var(--bad)' : 'var(--acc)'};border-radius:99px"></div></div>` : ''}
+      <div style="display:flex;gap:8px;align-items:flex-end;height:90px;margin-top:10px">${months.map(([m, v]) => `<div style="flex:1;text-align:center"><div title="${money(v)}" style="height:${Math.round(v / mx * 70)}px;background:var(--acc);border-radius:6px 6px 0 0"></div><div class="meta">${m}</div></div>`).join('')}</div>
+      <div class="row" style="margin-top:8px"><label>Monthly budget $ <input type="number" id="mbud" value="${S.monthly || ''}" style="width:100px"></label></div></div>
+    <div class="card"><b>Florida flower allotment</b> <span class="meta">— your own log, rolling 35 days. Your registry/doctor has the official number.</span>
+      <div class="big">${flower.toFixed(1)} g <span class="meta">of ${allot} g · ${Math.max(0, allot - flower).toFixed(1)} g left</span></div>
+      <div class="row"><label>My allotment (g per 35 days) <input type="number" id="allot" value="${allot}" style="width:90px"></label></div></div>
+    <div class="card"><b>Log a purchase</b>
+      <div class="row" style="margin-top:6px"><input id="pstore" list="dnames" placeholder="Store"><input id="pamt" type="number" step="0.01" placeholder="$ spent" style="width:110px"><input id="pg" type="number" step="0.1" placeholder="flower g" style="width:100px"><input id="pdate" type="date" value="${now.toISOString().slice(0, 10)}"><button class="pri" id="padd">Add</button></div>
+      <table style="margin-top:8px">${P.slice().reverse().slice(0, 30).map((x, i) => `<tr><td>${esc(x.date)} · ${esc(x.store)}${x.flowerG ? ` · ${x.flowerG} g` : ''}</td><td style="text-align:right">${money(x.amount)} <button data-delp="${P.length - 1 - i}">✕</button></td></tr>`).join('')}</table></div>`;
+  $('#mbud').onchange = e => { S.monthly = +e.target.value || 0; render(); };
+  $('#allot').onchange = e => { S.allotment = +e.target.value || 0; render(); };
+  $('#padd').onclick = () => { const amount = +$('#pamt').value; if (!amount) return toast('Enter the amount spent');
+    S.purchases = [...P, { date: $('#pdate').value, store: $('#pstore').value.trim() || 'Store', amount, flowerG: +$('#pg').value || 0 }].sort((a, b) => a.date.localeCompare(b.date)); render(); };
+  $('#spend').querySelectorAll('[data-delp]').forEach(b => b.onclick = () => { S.purchases = P.filter((_, i) => i !== +b.dataset.delp); render(); });
+}
+
 function renderSaved() {
   const pl = S.places || [];
   $('#saved').innerHTML = pl.map((x, i) => `<button class="chip ${S.center && Math.abs(S.center.lat - x.center.lat) < 1e-3 && Math.abs(S.center.lon - x.center.lon) < 1e-3 ? 'on' : ''}" data-place="${i}">📍 ${esc(x.name)} · ${x.radius} mi</button>`).join('')
@@ -489,7 +607,9 @@ document.addEventListener('click', e => {
 });
 let qst; $('#qs').oninput = e => { clearTimeout(qst); qst = setTimeout(() => { QS = e.target.value.trim().toLowerCase(); render(); }, 150); };
 let tts; $('#q').addEventListener('input', e => { clearTimeout(tts); const v = e.target.value.trim(); if (/^\d{5}$/.test(v)) tts = setTimeout(search, 500); });
-$('#go').onclick = search; $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+$('#go').onclick = search;
+$('#sharetop').onclick = shareTop;
+$('#listgo').onclick = () => { S.shopList = $('#shoplist').value; render(); }; $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
 $('#geo').onclick = async () => {
   toast('Finding your location…');
   const g = await api().locate_me();
