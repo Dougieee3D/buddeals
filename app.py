@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -327,7 +327,7 @@ class Api:
             with open(path, "wb") as f:
                 f.write(data)
             subprocess.Popen([path, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"], close_fds=True)
-            threading.Timer(1.0, lambda: [w.destroy() for w in list(webview.windows)]).start()
+            threading.Timer(1.0, self.quit_app).start()  # really quit (not just hide to tray) so the installer can replace files
             return {"ok": True}
         except Exception as e:
             return {"error": f"Update failed: {e}"}
