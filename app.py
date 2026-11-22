@@ -12,9 +12,10 @@ import urllib.request
 
 import webview
 
+import desktop
 import scan
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -155,6 +156,9 @@ class Api:
         self._lock = threading.Lock()
         self._login = None
         self._release = None
+        self._tray_on = True
+        self._quitting = False
+        self._told_tray = False
 
     # ----- settings, favorites, wallet (saved only on this PC) -----
     def load_store(self):
@@ -218,6 +222,37 @@ class Api:
         finally:
             if reader:
                 reader.close()
+
+    # ----- tray, notifications, start with Windows, QR -----
+    def notify(self, title, message):
+        return tray.notify(title, message) if tray else False
+
+    def set_tray(self, on):
+        self._tray_on = bool(on)
+        return True
+
+    def get_startup(self):
+        return desktop.get_startup()
+
+    def set_startup(self, on):
+        return desktop.set_startup(bool(on))
+
+    def qr(self, text):
+        try:
+            return desktop.qr_data_url(text)
+        except Exception:
+            return None
+
+    def quit_app(self):
+        self._quitting = True
+        if tray:
+            tray.stop()
+        for w in list(webview.windows):
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        return True
 
     def clear_cache(self):
         try:
@@ -299,9 +334,44 @@ class Api:
 
 
 api = Api()
-main = webview.create_window("BudDeals", url=os.path.join(BASE, "ui", "index.html"), js_api=api,
+START_HIDDEN = "--tray" in sys.argv
+main = webview.create_window("BudDeals", url=os.path.join(BASE, "ui", "index.html"), js_api=api, hidden=START_HIDDEN,
                              width=1200, height=860, min_size=(420, 600), background_color="#0f1712")
+
+
+def _open():
+    try:
+        main.show()
+        main.restore()
+    except Exception:
+        pass
+
+
+def _check():
+    try:
+        main.evaluate_js("window.checkNow && window.checkNow()")
+    except Exception:
+        pass
+
+
+tray = desktop.Tray(_open, _check, api.quit_app) if desktop.pystray else None
+
+
+def _closing():
+    """Closing the window keeps BudDeals in the tray (if that's on) so alerts keep working."""
+    if tray and api._tray_on and not api._quitting:
+        main.hide()
+        if not api._told_tray:
+            api._told_tray = True
+            tray.notify("BudDeals is still running", "Watching deals in the tray. Right-click the 🌿 icon to quit.")
+        return False
+    if tray:
+        tray.stop()
+    return True
+
+
+main.events.closing += _closing
 
 if __name__ == "__main__":
     os.makedirs(scan.DATA_DIR, exist_ok=True)
-    webview.start(private_mode=False, storage_path=os.path.join(scan.DATA_DIR, "webview"))
+    webview.start(lambda: tray and tray.start(), private_mode=False, storage_path=os.path.join(scan.DATA_DIR, "webview"))

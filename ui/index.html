@@ -130,7 +130,7 @@ const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, {
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const _UNUSED = 'dispensar|cannabis|marijuana|weed|Trulieve|Curaleaf|Sunnyside|Liberty Health|Fluent|M[UÜ]V|Surterra|Vidacann|Insa|RISE|Zen Leaf|AYR|GrowHealthy|Jungle Boys|Sanctuary|Flowery|Green Dragon|Cookies|Planet 13|Thrive|Cannabist|Beyond Hello|Verilife|Story Cannabis|Gold Flora';
 
-const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals', shopped: [], used: {}, hide: [], places: [], textSize: 100, autoUpdate: true, bgRefresh: true, workers: 8 }, ls.get('settings', {}));
+const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals', shopped: [], used: {}, hide: [], places: [], textSize: 100, autoUpdate: true, bgRefresh: true, workers: 8, tray: true, watch: [], alerted: {}, digest: '09:00', lastDigest: '' }, ls.get('settings', {}));
 const P = new URLSearchParams(location.search);
 if (P.get('q')) { S.q = P.get('q'); S.center = null; }
 if (P.get('r')) S.radius = +P.get('r');
@@ -221,10 +221,11 @@ function renderDeals() {
         ${d.stale ? '<span class="tag warn">site didn’t load last scan</span>' : ''}</div>
       <div class="dtext">${p.item ? `<b>${esc(p.text)}</b>${p.brand ? ` <span class="meta">${esc(p.brand)}</span>` : ''}<br>${money(p.price)}${p.was ? ` <s style="color:var(--dim)">${money(p.was)}</s>` : ''}${p.ppg ? ` · ${money(p.ppg)}/g` : ''}${p.thc ? ` · ${p.thc}% THC` : ''}${p.p100 ? ` · ${money(p.p100)}/100mg THC` : ''}${p.type ? ` · ${esc(p.type)}` : ''}${p.pct < 0.01 ? ' <span class="tag">regular price</span>' : ''}` : esc(p.text)}</div>
       <div class="meta"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
-      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">Source</a>` : ''}<button data-share="${i}">Share</button><button data-used="${i}" title="Hide this deal (already used it)">✓ Used</button>${d.host ? `<button data-reread="${esc(d.host)}" title="Read this store's menu again now">↻ Re-read</button>` : ''}</div>
+      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">Source</a>` : ''}<button data-share="${i}">Share</button><button data-used="${i}" title="Hide this deal (already used it)">✓ Used</button>${p.item ? `<button data-watch="${i}" title="Alert me when this goes on sale">👁 Watch</button>` : ''}${d.host ? `<button data-reread="${esc(d.host)}" title="Read this store's menu again now">↻ Re-read</button>` : ''}</div>
     </div>`).join('') : `<div class="card">No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found for today within ${S.radius} mi${QS ? ` matching “${esc(QS)}”` : ''}. ${scanning ? 'Still reading menus — results appear as each store finishes.' : 'Try a bigger radius, hit 🔄 Refresh, or check the <b>Stores</b> tab.'}</div>`;
   $('#deals').onclick = e => {
-    const b = e.target.closest('[data-share],[data-used],[data-reread]'); if (!b) return;
+    const b = e.target.closest('[data-share],[data-used],[data-reread],[data-watch]'); if (!b) return;
+    if (b.dataset.watch) { const { p } = list[+b.dataset.watch]; addWatch(p.text.replace(/\s*\d+(\.\d+)?\s?(g|mg)\b.*$/i, '').trim() || p.text, null); }
     if (b.dataset.share) share(list[+b.dataset.share]);
     if (b.dataset.used) { const { d, p } = list[+b.dataset.used]; S.used = { ...(S.used || {}), [usedKey(d, p)]: { at: new Date().toISOString(), label: `${p.label} — ${p.text}`.slice(0, 140), store: d.name } }; render(); toast('Marked as used. Restore it in ⚙️ Settings.'); }
     if (b.dataset.reread) rereadStore(b.dataset.reread);
@@ -278,9 +279,10 @@ function renderPlan() {
     : `<div style="margin:6px 0"><span class="big">${money(r.worth)}</span> <span class="meta">of product for ${money(B)}</span></div>${r.best ? `<div class="dtext">Using: <b>${esc(r.best.label)}</b> — ${esc(r.best.text)}</div>` : ''}<div class="meta">No menu prices read for this store — open its menu to pick items.</div>`}
     ${r.rewards ? `<div class="meta">+ ${money(r.rewards)} from your rewards/points</div>` : ''}
     <div class="meta">Gas ~${money(r.gas)} · <b style="color:${r.net >= 0 ? 'var(--acc)' : 'var(--bad)'}">net savings ${money(r.net)}</b></div>
-    <div class="acts">${links(r.d)}<button data-copycart="${i}">Copy list</button></div></div>`).join('') : '<div class="card">No menus or deals read for this area yet. Hit 🔄 Refresh, or try a bigger radius or another category.</div>';
-  $('#plan').onclick = async e => { const b = e.target.closest('[data-copycart]'); if (!b) return; const r = rows[+b.dataset.copycart];
-    const txt = `${r.d.name} — ${money(r.spent)}\n` + r.cart.map(x => `• ${x.name} ${money(x.price)}`).join('\n');
+    <div class="acts">${links(r.d)}<button data-copycart="${i}">Copy list</button><button data-qrcart="${i}">📱 Phone (QR)</button></div></div>`).join('') : '<div class="card">No menus or deals read for this area yet. Hit 🔄 Refresh, or try a bigger radius or another category.</div>';
+  $('#plan').onclick = async e => { const b = e.target.closest('[data-copycart],[data-qrcart]'); if (!b) return; const r = rows[+(b.dataset.copycart ?? b.dataset.qrcart)];
+    const txt = `${r.d.name} — ${money(r.spent)}\n` + r.cart.map(x => `• ${x.name} ${money(x.price)}`).join('\n') + (r.best ? `\nAsk about: ${r.best.label}` : '');
+    if (b.dataset.qrcart) return showQR(txt);
     try { await navigator.clipboard.writeText(txt); toast('Shopping list copied'); } catch {} };
 }
 function renderWallet() {
@@ -346,7 +348,7 @@ async function locate(center, force = false) {
     const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8);
     LIVE = r.dispensaries || LIVE; DATA.updated = r.updated;
     $('#updated').textContent = r.updated ? `menus read ${ago(r.updated)}` : '';
-    scanning = false; render();
+    scanning = false; render(); runAlerts();
     if (r.error) toast(r.error);
   } finally {
     scanning = false;
@@ -361,6 +363,56 @@ async function rereadStore(host) {
 }
 window.onScanProgress = (done, total) => { if (total) toast(`Reading menus… ${done}/${total} stores done — results fill in as each one finishes`); };
 setInterval(() => { if (S.bgRefresh !== false && S.center && !scanning) locate(S.center, false); }, 30 * 60 * 1000);
+
+function addWatch(q, max) {
+  if ((S.watch || []).some(w => w.q.toLowerCase() === q.toLowerCase())) return toast(`Already watching “${q}”.`);
+  S.watch = [...(S.watch || []), { q, max }]; render(); toast(`Watching “${q}” — you'll get a pop-up when it's on sale${max ? ` or under ${money(max)}` : ''}.`);
+}
+function allValid() {
+  const out = [];
+  for (const d of DISPS) for (const p of d.parsed) if (!p.expired && appliesToday(p) && !(p.newOnly && shopped(d)) && !S.used?.[usedKey(d, p)] && !hidden(d, p)) out.push({ d, p });
+  return out;
+}
+function runAlerts() {
+  const today = new Date().toISOString().slice(0, 10), alerted = { ...(S.alerted || {}) }, msgs = [];
+  for (const w of S.watch || []) {
+    const q = w.q.toLowerCase();
+    const hits = allValid().filter(({ d, p }) => p.item && `${p.text} ${p.brand || ''}`.toLowerCase().includes(q) && (w.max ? p.price <= w.max : p.pct >= 0.05))
+      .sort((a, b) => a.p.price - b.p.price);
+    for (const { d, p } of hits.slice(0, 3)) {
+      const k = `w|${today}|${usedKey(d, p)}|${p.price}`; if (alerted[k]) continue; alerted[k] = 1;
+      msgs.push([`👁 ${w.q}: ${p.label}`, `${p.text} — ${money(p.price)}${p.was ? ` (was ${money(p.was)})` : ''} at ${d.name}, ${d.dist.toFixed(1)} mi`]);
+    }
+  }
+  for (const w of wallet) for (const o of w.offers || []) {
+    const p = parseDeal(o); if (!p.expires || p.expired) continue;
+    const days = Math.ceil((new Date(p.expires) - new Date()) / 864e5);
+    const k = `r|${today}|${w.store}|${o}`;
+    if (days <= 3 && !alerted[k]) { alerted[k] = 1; msgs.push([`🎁 ${w.store} reward ends ${days <= 0 ? 'today' : `in ${days} day${days > 1 ? 's' : ''}`}`, o]); }
+  }
+  const keys = Object.keys(alerted); if (keys.length > 400) for (const k of keys.slice(0, keys.length - 400)) delete alerted[k];
+  S.alerted = alerted; save();
+  msgs.slice(0, 5).forEach(([t, m], i) => setTimeout(() => api().notify(t, m), i * 4000));
+}
+async function digestTick() {
+  if (!S.digest || !S.center) return;
+  const now = new Date(), today = now.toISOString().slice(0, 10), [h, m] = S.digest.split(':').map(Number);
+  if (S.lastDigest === today || now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
+  S.lastDigest = today; save();
+  await locate(S.center, false);
+  const top = allValid().filter(x => x.p.score >= 0.1).sort((a, b) => b.p.score - a.p.score).slice(0, 5);
+  if (top.length) api().notify(`☀️ Today's top deals near ${S.center.label.split(',')[0]}`, top.map(({ d, p }) => `${p.label} ${p.item ? p.text : ''} @ ${d.name.split(' ')[0]}`).join(' · '));
+}
+setInterval(digestTick, 60 * 1000);
+window.checkNow = () => S.center && locate(S.center, true);
+async function showQR(text) {
+  const url = await api().qr(text);
+  const o = document.createElement('div');
+  o.style.cssText = 'position:fixed;inset:0;background:#000c;z-index:99;display:grid;place-items:center';
+  o.innerHTML = `<div class="card" style="text-align:center;max-width:360px">${url ? `<img src="${url}" style="width:300px;background:#fff;border-radius:8px">` : `<pre style="white-space:pre-wrap;text-align:left">${esc(text)}</pre>`}<div class="meta" style="margin:8px 0">Scan with your phone's camera to take the list with you.</div><button class="pri">Close</button></div>`;
+  o.onclick = e => { if (e.target === o || e.target.tagName === 'BUTTON') o.remove(); };
+  document.body.appendChild(o);
+}
 
 function renderSaved() {
   const pl = S.places || [];
@@ -388,6 +440,13 @@ function renderSettings() {
       <label>Text size <input type="range" min="80" max="140" step="5" value="${S.textSize || 100}" data-set="textSize"> <b>${S.textSize || 100}%</b></label></div>
     <div class="row"><label>Sales tax % <input type="number" step="0.5" value="${S.tax || 0}" data-set="tax" style="width:80px"></label><label>Gas $/mile <input type="number" step="0.01" value="${S.gas ?? 0.15}" data-set="gas" style="width:90px"></label></div>
   </div>
+  <div class="card"><b>Alerts</b> <span class="meta">— Windows pop-ups, even with the window closed</span>
+    <div class="row" style="margin-top:6px"><label><input type="checkbox" data-set="tray" ${S.tray !== false ? 'checked' : ''}> Keep BudDeals running in the tray when I close the window</label></div>
+    <div class="row"><label><input type="checkbox" id="startup"> Start BudDeals with Windows (quietly, in the tray)</label></div>
+    <div class="row"><label>Morning digest of today's top 5 deals at <input type="time" value="${esc(S.digest || '')}" data-set="digest"></label><span class="meta">(clear the time to turn it off)</span></div>
+    <div style="margin-top:8px"><b>Watchlist</b> <span class="meta">— alert me when these go on sale or under my price</span></div>
+    ${(S.watch || []).map((w, i) => `<div class="row" style="justify-content:space-between"><span>👁 ${esc(w.q)}${w.max ? ` · under ${money(w.max)}` : ' · any sale'}</span><button data-delwatch="${i}">Remove</button></div>`).join('') || '<div class="meta">Nothing yet — hit “👁 Watch” on any product, or add one below.</div>'}
+    <div class="row"><input id="wq" placeholder="Product, strain or brand (e.g. Blue Dream, Roll One cart)" style="flex:1"><input id="wmax" type="number" placeholder="max $ (optional)" style="width:130px"><button id="wadd2">Add</button></div></div>
   <div class="card"><b>Stores I've shopped at</b> <span class="meta">— first-time-customer deals are hidden for these</span>
     <div style="columns:2;margin-top:6px">${stores.map(([k, n]) => `<label style="display:block"><input type="checkbox" data-shop="${esc(k)}" ${(S.shopped || []).includes(k) ? 'checked' : ''}> ${esc(n)}</label>`).join('') || '<span class="meta">Search an area first.</span>'}</div></div>
   <div class="card"><b>Used deals</b> <span class="meta">— hidden everywhere</span>
@@ -400,10 +459,14 @@ function renderSettings() {
     <div class="meta" style="margin-top:6px">Everything is stored only on this PC. BudDeals v<span class="vv"></span></div></div>`;
   api().version().then(v => $('#settings .vv').textContent = v);
   const el = $('#settings');
-  el.querySelectorAll('[data-set]').forEach(i => i.onchange = () => { const k = i.dataset.set; S[k] = i.type === 'checkbox' ? i.checked : (i.type === 'range' || i.type === 'number' || i.tagName === 'SELECT') ? +i.value : i.value; render(); });
+  el.querySelectorAll('[data-set]').forEach(i => i.onchange = () => { const k = i.dataset.set; S[k] = i.type === 'checkbox' ? i.checked : (i.type === 'range' || i.type === 'number' || i.tagName === 'SELECT') ? +i.value : i.value; if (k === 'tray') api().set_tray(S.tray); render(); });
   el.querySelectorAll('[data-shop]').forEach(i => i.onchange = () => { const k = i.dataset.shop; S.shopped = i.checked ? [...new Set([...(S.shopped || []), k])] : (S.shopped || []).filter(x => x !== k); save(); });
   el.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { const u = { ...(S.used || {}) }; delete u[b.dataset.restore]; S.used = u; render(); });
   el.querySelectorAll('[data-delplace]').forEach(b => b.onclick = () => { S.places = (S.places || []).filter((_, i) => i !== +b.dataset.delplace); render(); });
+  api().get_startup().then(v => { $('#startup').checked = !!v; });
+  $('#startup').onchange = async e => { const ok = await api().set_startup(e.target.checked); if (!ok) toast('Couldn’t change the Windows startup setting.'); };
+  el.querySelectorAll('[data-delwatch]').forEach(b => b.onclick = () => { S.watch = (S.watch || []).filter((_, i) => i !== +b.dataset.delwatch); render(); });
+  $('#wadd2').onclick = () => { const q = $('#wq').value.trim(); if (q) addWatch(q, +$('#wmax').value || null); };
   $('#hidewords').onchange = e => { S.hide = e.target.value.split('\n').map(x => x.trim()).filter(Boolean); save(); };
   $('#clearcache').onclick = async () => { await api().clear_cache(); toast('Saved menus cleared.'); if (S.center) locate(S.center, true); };
   $('#aexp2').onclick = () => $('#aexp').click();
@@ -490,6 +553,7 @@ $('#budget').value = S.budget; $('#tax').value = S.tax; $('#gas').value = S.gas;
 $('#updated').textContent = '';
 api().version().then(v => { $('#ver').textContent = ' · BudDeals v' + v; });
 checkUpdate();
+api().set_tray(S.tray !== false);
 render();
 if (S.q && !S.center) search(); else if (S.center) locate(S.center);
 </script>
