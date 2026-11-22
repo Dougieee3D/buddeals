@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -357,8 +357,29 @@ class Api:
                     return {"error": "The download didn’t match its checksum, so it wasn’t installed."}
             with open(path, "wb") as f:
                 f.write(data)
-            subprocess.Popen([path, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"], close_fds=True)
-            threading.Timer(1.0, self.quit_app).start()  # really quit (not just hide to tray) so the installer can replace files
+            exe = sys.executable if getattr(sys, "frozen", False) else ""
+            # A helper outside the app: wait for BudDeals to fully exit (force it after 20s), install silently, reopen.
+            ps1 = os.path.join(tempfile.gettempdir(), "BudDeals-update.ps1")
+            with open(ps1, "w", encoding="utf-8") as f:
+                f.write(
+                    "$ErrorActionPreference='SilentlyContinue'\n"
+                    "for($i=0;$i -lt 40;$i++){ if(-not (Get-Process -Name BudDeals)){break}; Start-Sleep -Milliseconds 500 }\n"
+                    "Get-Process -Name BudDeals | Stop-Process -Force; Start-Sleep -Seconds 1\n"
+                    f"Start-Process -FilePath '{path}' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOCANCEL' -Wait\n"
+                    + (f"Start-Process -FilePath '{exe}'\n" if exe else "")
+                )
+            flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS | NEW_PROCESS_GROUP | NO_WINDOW
+            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps1]
+            try:
+                subprocess.Popen(cmd, creationflags=flags | 0x01000000, close_fds=True)  # + BREAKAWAY_FROM_JOB
+            except OSError:
+                subprocess.Popen(cmd, creationflags=flags, close_fds=True)
+
+            def _bye():
+                self.quit_app()
+                time.sleep(1.5)
+                os._exit(0)  # make sure nothing (tray, hidden windows) keeps the old version running
+            threading.Thread(target=_bye, daemon=True).start()
             return {"ok": True}
         except Exception as e:
             return {"error": f"Update failed: {e}"}

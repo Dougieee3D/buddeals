@@ -30,4 +30,4 @@ Name: "{group}\BudDeals"; Filename: "{app}\BudDeals.exe"
 Name: "{userdesktop}\BudDeals"; Filename: "{app}\BudDeals.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\BudDeals.exe"; Description: "Open BudDeals"; Flags: nowait postinstall
+Filename: "{app}\BudDeals.exe"; Description: "Open BudDeals"; Flags: nowait postinstall skipifsilent

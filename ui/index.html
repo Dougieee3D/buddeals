@@ -657,7 +657,14 @@ $('#wclear').onclick = async () => toast((await api().clear_logins()) ? 'Signed 
 $('#refresh').onclick = () => S.center ? locate(S.center, true) : toast('Pick a location first');
 async function checkUpdate() {
   const u = await api().check_update(); if (!u) return;
+  const tried = S.updTried && S.updTried.v === u.version && Date.now() - S.updTried.at < 15 * 60 * 1000;
+  if (tried) {  // last automatic try didn't stick: don't loop, offer a manual install instead
+    $('#update').innerHTML = `<div class="banner">BudDeals ${esc(u.version)} didn't install automatically. <button class="pri" id="upd">Try again</button> <a target="_blank" href="https://github.com/Dougieee3D/buddeals/releases/latest">Download it</a></div>`;
+    $('#upd').onclick = async () => { S.updTried = { v: u.version, at: Date.now() }; save(); toast('Installing update…'); const r = await api().install_update(); if (r.error) toast(r.error); };
+    return;
+  }
   if (S.autoUpdate !== false) {
+    S.updTried = { v: u.version, at: Date.now() }; save();
     $('#update').innerHTML = `<div class="banner">⬆️ Updating BudDeals to ${esc(u.version)}… it will reopen by itself in a few seconds.</div>`;
     const r = await api().install_update(); if (r.error) { $('#update').innerHTML = `<div class="banner">Update failed: ${esc(r.error)}</div>`; } return;
   }
