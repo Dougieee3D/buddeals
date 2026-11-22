@@ -38,6 +38,35 @@ CATS = {
     "accessory": r"accessor(?:y|ies)|glass|pipes?|bongs?|batter(?:y|ies)|papers?|grinders?|lighters?",
 }
 
+# Chain websites, used when the map listing has no website.
+CHAIN_SITES = [
+    (r"trulieve", "https://www.trulieve.com/deals"), (r"curaleaf", "https://curaleaf.com"), (r"m[uü]v", "https://muvfl.com"),
+    (r"sunnyside", "https://www.sunnyside.shop"), (r"green dragon", "https://greendragon.com"), (r"\bayr\b", "https://ayrdispensaries.com"),
+    (r"liberty health", "https://www.libertyhealthsciences.com"), (r"fluent", "https://getfluent.com"), (r"\brise\b", "https://risecannabis.com"),
+    (r"zen leaf", "https://zenleafdispensaries.com"), (r"cannabist", "https://www.gocannabist.com"), (r"\binsa\b", "https://insa.com"),
+    (r"jungle boys", "https://jungleboysflorida.com"), (r"flowery", "https://theflowery.co"),
+]
+GRAM_RX = [(r"(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b", None), (r"\b1/8\b|eighth", 3.5), (r"\b1/4\b|quarter", 7.0),
+           (r"\b1/2\s*oz|half\s*(?:oz|ounce)", 14.0), (r"\b(?:1\s*)?(?:oz|ounce)\b", 28.0)]
+
+
+def grams_of(name):
+    for rx, val in GRAM_RX:
+        m = re.search(rx, name, re.I)
+        if m:
+            g = val or float(m.group(1))
+            return g if 0.1 <= g <= 56 else None
+    return None
+
+
+def host_of(url):
+    try:
+        u = url if re.match(r"https?:", url, re.I) else "https://" + url
+        return (urllib.parse.urlparse(u).hostname or "").lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
 _lock = threading.Lock()
 
 
@@ -136,7 +165,8 @@ def _to_disp(e):
         "id": f"{e['type']}/{e['id']}", "name": t.get("name") or t.get("brand") or "Dispensary",
         "lat": e.get("lat", c.get("lat")), "lon": e.get("lon", c.get("lon")),
         "address": " ".join(x for x in [t.get("addr:housenumber"), t.get("addr:street"), t.get("addr:city"), t.get("addr:state")] if x),
-        "website": t.get("website") or t.get("contact:website") or t.get("url") or "",
+        "website": t.get("website") or t.get("contact:website") or t.get("url")
+        or next((u for rx, u in CHAIN_SITES if re.search(rx, t.get("name") or t.get("brand") or "", re.I)), ""),
         "phone": t.get("phone") or t.get("contact:phone") or "", "hours": t.get("opening_hours") or "",
     }
 
@@ -217,57 +247,97 @@ def extract(page, base):
     return {"deals": deals, "links": links[:3], "products": products}
 
 
-def read_site(website):
+def _product(x, src):
+    try:
+        price = float(x.get("price") or 0)
+    except (TypeError, ValueError):
+        return None
+    name = str(x.get("name") or "")[:140]
+    if not name or not 0.5 <= price <= 2000:
+        return None
+    was = x.get("was")
+    m = re.search(r"(\d{1,2})\s*%", x.get("tag") or "")
+    if not was and m and 5 <= int(m.group(1)) < 90:
+        was = round(price / (1 - int(m.group(1)) / 100), 2)
+    return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats_of(name), "grams": grams_of(name), "src": src}
+
+
+def read_site(website, reader=None):
+    """reader(url) -> {url, lines, items, links} from a real (hidden) browser; falls back to a plain download."""
     base = website if re.match(r"https?:", website, re.I) else "https://" + website
     pages, seen, deals, products, ok = [base], set(), [], [], False
     i = 0
-    while i < len(pages) and i < 5:
+    while i < len(pages) and i < 4:
         url = pages[i]
         i += 1
         if url in seen:
             continue
         seen.add(url)
         try:
-            ctype, final, raw = _get(url)
-            if "html" not in ctype.lower():
-                continue
-            ok = True
-            r = extract(raw.decode("utf-8", "replace"), final)
-            deals += [{"text": s, "src": final} for s in r["deals"]]
-            products += r["products"]
+            if reader:
+                r = reader(url) or {}
+                final = r.get("url") or url
+                lines, links = r.get("lines") or [], r.get("links") or []
+                prods = [p for p in (_product(x, final) for x in r.get("items") or []) if p]
+                ok = ok or bool(r.get("url"))
+            else:
+                ctype, final, raw = _get(url)
+                if "html" not in ctype.lower():
+                    continue
+                ok = True
+                r = extract(raw.decode("utf-8", "replace"), final)
+                lines, links = r["deals"], r["links"]
+                prods = [{**p, "was": None, "grams": grams_of(p["name"]), "src": final} for p in r["products"]]
+            deals += [{"text": t, "src": final} for t in lines]
+            products += prods
             if len(seen) == 1:
-                pages += r["links"] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")]
+                pages += links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")]
         except Exception:
             pass
-    uniq = list({d["text"].lower(): d for d in deals}.values())[:20]
-    return ok, {"t": time.time(), "deals": uniq, "products": products[:60]}
+    uniq = list({d["text"].lower(): d for d in deals}.values())[:30]
+    prods = list({(p["name"].lower(), p["price"]): p for p in products}.values())[:150]
+    return ok, {"t": time.time(), "deals": uniq, "products": prods}
 
 
-def scan(lat, lon, miles, force=False, progress=None):
+def scan(lat, lon, miles, force=False, progress=None, reader=None):
     with _lock:
         cache = _load()
     disps, note = dispensaries(lat, lon, miles, cache, force)
-    todo = [d for d in disps if d["website"] and (force or time.time() - cache["sites"].get(d["website"], {}).get("t", 0) > SITE_TTL)]
+    for d in disps:
+        if not d["website"]:
+            d["website"] = next((u for rx, u in CHAIN_SITES if re.search(rx, d["name"], re.I)), "")
+    sites = {}
+    for d in disps:
+        h = host_of(d["website"]) if d["website"] else ""
+        if h and h not in sites:
+            sites[h] = d["website"]
+    todo = [(h, w) for h, w in sites.items() if force or time.time() - cache["sites"].get(h, {}).get("t", 0) > SITE_TTL]
     done = 0
     if progress and todo:
         progress(0, len(todo))
-    with cf.ThreadPoolExecutor(max_workers=8) as pool:
-        futs = {pool.submit(read_site, d["website"]): d for d in todo}
+    with cf.ThreadPoolExecutor(max_workers=3 if reader else 8) as pool:
+        futs = {pool.submit(read_site, w, reader): h for h, w in todo}
         for f in cf.as_completed(futs):
-            ok, data = f.result()
-            site = futs[f]["website"]
-            if ok or not cache["sites"].get(site, {}).get("deals"):
-                cache["sites"][site] = data
+            h = futs[f]
+            try:
+                ok, data = f.result()
+            except Exception:
+                ok, data = False, {"t": time.time(), "deals": [], "products": []}
+            old = cache["sites"].get(h, {})
+            if ok or not (old.get("deals") or old.get("products")):
+                cache["sites"][h] = data
             else:
-                cache["sites"][site]["stale"] = True
+                old["stale"] = True
             done += 1
-            if progress and (done % 3 == 0 or done == len(todo)):
+            if progress:
                 progress(done, len(todo))
     out = []
     for d in disps:
-        s = cache["sites"].get(d["website"], {}) if d["website"] else {}
+        s = cache["sites"].get(host_of(d["website"]), {}) if d["website"] else {}
         out.append({**d, "deals": s.get("deals", []), "products": s.get("products", []), "stale": s.get("stale", False),
                     "checked": datetime.fromtimestamp(s["t"], timezone.utc).isoformat() if s.get("t") else None})
     with _lock:
         _save(cache)
-    return {"dispensaries": out, "updated": datetime.now(timezone.utc).isoformat(), "error": note}
+    if not disps and not note:
+        note = "No dispensaries found on the map within this radius. Try a bigger radius."
+    return {"dispensaries": out, "updated": datetime.now(timezone.utc).isoformat(), "error": note, "sitesRead": len(sites)}
