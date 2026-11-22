@@ -1,0 +1,105 @@
+name: Build BudDeals
+
+# Builds BudDeals-Setup.exe on every push to main, scans it with Microsoft Defender,
+# and publishes it as the latest release (the app updates itself from here).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read the version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app.py -Pattern 'APP_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "BudDeals $v"
+
+      - name: Install build tools
+        run: python -m pip install pyinstaller pywebview
+
+      - name: Quick checks
+        shell: pwsh
+        run: |
+          python -m py_compile app.py scan.py
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python -c "import scan; r = scan.extract('<p>Spend 200 dollars, buy 2 get 1 free</p>', 'https://x.com'); assert r['deals'], r"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          node -e "import('./ui/js/dealparse.mjs').then(p => { if (p.parseDeal('40% off vapes').kind !== 'pct') process.exit(1); })"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build BudDeals.exe
+        shell: pwsh
+        run: |
+          python -m PyInstaller --onedir --noconsole --noconfirm --clean --log-level WARN --name BudDeals --add-data "ui;ui" --collect-all webview app.py
+          if (-not (Test-Path dist\BudDeals\BudDeals.exe)) { throw "BudDeals.exe wasn't built" }
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Q "/DMyVersion=${{ steps.ver.outputs.version }}" installer.iss
+          if (-not (Test-Path out\BudDeals-Setup.exe)) { throw "The installer wasn't built" }
+
+      - name: Scan with Microsoft Defender
+        shell: pwsh
+        run: |
+          $mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if (Test-Path $mp) {
+            & $mp -SignatureUpdate | Out-Null
+            & $mp -Scan -ScanType 3 -File (Resolve-Path out\BudDeals-Setup.exe) -DisableRemediation
+            if ($LASTEXITCODE -eq 2) { throw "Microsoft Defender flagged the installer" }
+          }
+          exit 0
+
+      - name: Checksum and notes
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash out\BudDeals-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          "$h  BudDeals-Setup.exe" | Out-File out\SHA256SUMS.txt -Encoding ascii
+          $msg = (git log -1 --pretty=%B) | Where-Object { $_ -notmatch '^(Co-Authored-By|Claude-Session):' }
+          $tail = @(
+            "",
+            "---",
+            "**Download ``BudDeals-Setup.exe`` below and run it.** Already installed? BudDeals offers the update when you open it.",
+            "Windows may show ""Windows protected your PC"" the first time: click **More info**, then **Run anyway**."
+          )
+          (@($msg) + $tail) -join "`n" | Out-File out\release-notes.md -Encoding utf8
+
+      - name: Replace this version's old release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "v${{ steps.ver.outputs.version }}" --cleanup-tag --yes 2>$null
+          exit 0
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: BudDeals ${{ steps.ver.outputs.version }}
+          make_latest: true
+          files: |
+            out/BudDeals-Setup.exe
+            out/SHA256SUMS.txt
+          body_path: out/release-notes.md

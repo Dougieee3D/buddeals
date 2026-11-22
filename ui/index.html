@@ -41,6 +41,7 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
     <input id="q" placeholder="ZIP, city, or address (anywhere)" autocomplete="postal-code">
     <button class="pri" id="go">Search</button>
     <button id="geo" title="Use my location">📍 Me</button>
+    <button id="refresh" title="Re-read every dispensary site now">🔄 Refresh</button>
   </div>
   <div class="row" style="margin-top:8px">
     <label>Radius <b id="rv">25</b> mi</label><input id="radius" type="range" min="5" max="150" step="5" value="25" style="flex:1;padding:0">
@@ -57,6 +58,7 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
   <nav class="tabs" id="tabs"></nav>
 </header>
 <main>
+  <div id="update"></div>
   <div id="banner"></div>
   <div class="status" id="status"></div>
   <section id="t-deals"><div class="grid" id="deals"></div></section>
@@ -73,13 +75,15 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
   </section>
   <section id="t-wallet" class="hide">
     <div class="card" style="margin-bottom:12px">
-      <b>🔒 Your rewards stay on this device.</b> Nothing here is uploaded or shared, and BudDeals never asks for passwords.
+      <b>🔒 Sign in to read your points &amp; personal deals.</b> You log in on the dispensary's own page inside BudDeals. The app never sees or saves your password, and your rewards stay on this PC.
+      <div class="row" style="margin-top:8px"><input id="wsite" list="dsites" placeholder="Dispensary website, e.g. trulieve.com" style="flex:1;min-width:200px">
+        <button class="pri" id="wopen">Open &amp; sign in</button><button id="wread">Read my rewards</button></div>
       <ol class="meta" style="margin:8px 0 0;padding-left:18px">
-        <li>Drag this button to your bookmarks bar (on a phone, bookmark this page, then edit the bookmark's URL and paste the code from <a href="#" id="copybm">here</a>): <a class="bm" id="bm" href="#">🌿 Grab my rewards</a></li>
-        <li>Log into your dispensary's site in your own browser and open your rewards/points page.</li>
-        <li>Tap the bookmark. It copies only point, reward and offer lines (emails/phone numbers are stripped).</li>
-        <li>Come back here and paste it below. Or just type it in yourself.</li>
+        <li>Pick the dispensary's site and click <b>Open &amp; sign in</b>. Log in like normal; it remembers you next time.</li>
+        <li>Go to your rewards / points / offers page in that window.</li>
+        <li>Click <b>Read my rewards</b>. Points, reward $ and personal offers (like birthday deals) get added below and count in the Budget tab.</li>
       </ol>
+      <div class="acts"><button id="wclear">Sign out of all dispensary sites</button></div>
     </div>
     <div class="form">
       <label>Paste from "Grab my rewards" (or type offers, one per line)<textarea id="wpaste" placeholder="You have 1,240 points&#10;$12 in rewards available&#10;Happy Birthday! 30% off one order"></textarea></label>
@@ -103,13 +107,13 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{backg
     </div>
     <div class="grid" id="manual" style="margin-top:12px"></div>
   </section>
-  <datalist id="dnames"></datalist>
+  <datalist id="dnames"></datalist><datalist id="dsites"></datalist>
 </main>
 <footer>
   Deals are read automatically from dispensaries' public websites and can be wrong or out of date. Confirm before you buy.
   For adults 21+ or registered medical patients where it's legal. Don't drive impaired.<br>
   Dispensary locations © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
-  <span id="ghlinks"></span>
+  <span id="ver"></span>
 </footer>
 
 <script type="module">
@@ -117,10 +121,13 @@ import { CATS, CAT_LABEL, parseDeal, parseRewards, appliesToday, matchesCat, ret
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const ls = { get: (k, d) => { try { return JSON.parse(localStorage.getItem('bd_' + k)) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bd_' + k, JSON.stringify(v)); } catch {} } };
+const api = () => window.pywebview.api;
+await new Promise(r => (window.pywebview && window.pywebview.api) ? r() : window.addEventListener('pywebviewready', r, { once: true }));
+let STORE = (await api().load_store()) || {};
+const ls = { get: (k, d) => STORE[k] ?? d, set: (k, v) => { STORE[k] = v; api().save(k, v); } };
 const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const NAME_RX = 'dispensar|cannabis|marijuana|weed|Trulieve|Curaleaf|Sunnyside|Liberty Health|Fluent|M[UÜ]V|Surterra|Vidacann|Insa|RISE|Zen Leaf|AYR|GrowHealthy|Jungle Boys|Sanctuary|Flowery|Green Dragon|Cookies|Planet 13|Thrive|Cannabist|Beyond Hello|Verilife|Story Cannabis|Gold Flora';
+const _UNUSED = 'dispensar|cannabis|marijuana|weed|Trulieve|Curaleaf|Sunnyside|Liberty Health|Fluent|M[UÜ]V|Surterra|Vidacann|Insa|RISE|Zen Leaf|AYR|GrowHealthy|Jungle Boys|Sanctuary|Flowery|Green Dragon|Cookies|Planet 13|Thrive|Cannabist|Beyond Hello|Verilife|Story Cannabis|Gold Flora';
 
 const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals' }, ls.get('settings', {}));
 const P = new URLSearchParams(location.search);
@@ -133,36 +140,8 @@ const save = () => ls.set('settings', S);
 
 // ---------- geo ----------
 const hav = (a, b, c, d) => { const R = 3958.8, r = x => x * Math.PI / 180, dl = r(c - a), dn = r(d - b); const h = Math.sin(dl / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
-async function geocode(q) {
-  if (/^\d{5}$/.test(q.trim())) {
-    const r = await fetch('https://api.zippopotam.us/us/' + q.trim());
-    if (r.ok) { const j = await r.json(), p = j.places[0]; return { lat: +p.latitude, lon: +p.longitude, label: `${p['place name']}, ${p['state abbreviation']} ${q}` }; }
-  }
-  const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
-  const j = await r.json();
-  if (!j[0]) throw new Error('Couldn’t find that place');
-  return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name.split(',').slice(0, 3).join(',') };
-}
-async function reverse(lat, lon) {
-  try { const j = await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${lat}&lon=${lon}`)).json(); const a = j.address || {}; return [a.city || a.town || a.village || a.county, a.state].filter(Boolean).join(', '); } catch { return 'your location'; }
-}
-async function overpass(c, miles) {
-  const key = `op_${c.lat.toFixed(2)}_${c.lon.toFixed(2)}_${miles}`, hit = ls.get(key);
-  if (hit && Date.now() - hit.t < 12 * 3600e3) return hit.d;
-  const r = Math.round(miles * 1609.34), a = `(around:${r},${c.lat},${c.lon})`;
-  const q = `[out:json][timeout:45];(nwr["shop"="cannabis"]${a};nwr["name"~"${NAME_RX}",i]["shop"]${a};nwr["name"~"${NAME_RX}",i]["healthcare"]${a};nwr["name"~"${NAME_RX}",i]["amenity"]${a};);out center tags;`;
-  for (const ep of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
-    try {
-      const res = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-      if (!res.ok) continue;
-      const d = (await res.json()).elements.map(e => { const t = e.tags || {}; return { id: `${e.type}/${e.id}`, name: t.name || t.brand || 'Dispensary', lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, address: [t['addr:housenumber'], t['addr:street'], t['addr:city'], t['addr:state']].filter(Boolean).join(' '), website: t.website || t['contact:website'] || '', phone: t.phone || t['contact:phone'] || '', hours: t.opening_hours || '', deals: [], products: [] }; }).filter(d => d.lat);
-      for (const k of Object.keys(localStorage)) if (k.startsWith('bd_op_') && k !== 'bd_' + key) localStorage.removeItem(k);
-      ls.set(key, { t: Date.now(), d });
-      return d;
-    } catch {}
-  }
-  return [];
-}
+async function geocode(q) { const g = await api().geocode(q); if (!g) throw new Error('Couldn’t find that place'); return g; }
+const reverse = (lat, lon) => api().reverse(lat, lon);
 
 // ---------- data ----------
 function walletFor(d) { const n = norm(d.name); return wallet.filter(w => { const s = norm(w.store); return s && (n.includes(s) || s.includes(n)); }); }
@@ -182,6 +161,7 @@ function build() {
     return { ...d, dist, parsed, wallet: w };
   }).filter(d => d.dist <= S.radius + 0.01).sort((a, b) => a.dist - b.dist);
   $('#dnames').innerHTML = DISPS.map(d => `<option value="${esc(d.name)}">`).join('');
+  $('#dsites').innerHTML = [...new Set(DISPS.filter(d => d.website).map(d => d.website))].map(w => `<option value="${esc(w)}">`).join('');
 }
 function visibleDeals() {
   const out = [];
@@ -288,13 +268,8 @@ function ago(iso) { if (!iso) return ''; const m = (Date.now() - new Date(iso)) 
 function toast(t) { $('#status').textContent = t; }
 
 function banner() {
-  const c = S.center, gh = repo();
-  if (!c) { $('#banner').innerHTML = '<div class="banner">Type a ZIP/city or tap 📍 Me to start.</div>'; return; }
-  const covered = (DATA.regions || []).some(r => hav(c.lat, c.lon, r.lat, r.lon) <= r.radiusMiles);
-  $('#banner').innerHTML = covered ? '' : `<div class="banner">Dispensaries here are live from OpenStreetMap, but this area isn’t in the automatic deal scan yet.
-    ${gh ? `<a target="_blank" href="https://github.com/${gh}/edit/main/regions.json">Add it to regions.json</a> (lat <code>${c.lat.toFixed(4)}</code>, lon <code>${c.lon.toFixed(4)}</code>) and it’ll be scanned on the next run.` : 'Add it to regions.json to scan it.'}</div>`;
+  $('#banner').innerHTML = S.center ? '' : '<div class="banner">Type a ZIP/city or tap 📍 Me to start.</div>';
 }
-function repo() { return location.hostname.endsWith('github.io') ? `${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}` : ''; }
 
 function render() {
   save();
@@ -307,11 +282,19 @@ function render() {
   ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual })[S.tab]();
 }
 
-async function locate(center) {
-  S.center = center; save(); toast('Finding dispensaries…');
-  LIVE = await overpass(center, S.radius);
-  render();
+let scanning = false;
+async function locate(center, force = false) {
+  if (scanning) return; scanning = true;
+  S.center = center; save(); toast(`Finding dispensaries near ${center.label}… (first scan of a new area can take a minute)`);
+  try {
+    const r = await api().scan(center.lat, center.lon, S.radius, force);
+    LIVE = r.dispensaries || []; DATA.updated = r.updated;
+    $('#updated').textContent = r.updated ? `deals read ${ago(r.updated)}` : '';
+    render();
+    if (r.error) toast(r.error);
+  } finally { scanning = false; }
 }
+window.onScanProgress = (done, total) => toast(`Reading dispensary deal pages… ${done}/${total}`);
 async function search() {
   const q = $('#q').value.trim(); if (!q) return;
   toast('Looking up ' + q + '…');
@@ -360,20 +343,32 @@ $('#wadd').onclick = () => {
   old >= 0 ? (wallet[old] = entry) : wallet.unshift(entry);
   ls.set('wallet', wallet); $('#wpaste').value = ''; render();
 };
-// Bookmarklet: runs on the rewards page in YOUR browser, keeps only reward-ish lines, strips emails/phones, copies to clipboard. Sends nothing anywhere.
-const BM = `(()=>{const L=document.body.innerText.split(/\\n+/).map(s=>s.trim()).filter(s=>s.length>2&&s.length<200&&/(point|pts|reward|\\$|%|off|birthday|coupon|offer|free|credit|voucher)/i.test(s)&&!/@|\\d{3}[-. )]+\\d{3}[-. ]\\d{4}/.test(s)).slice(0,60);const t=JSON.stringify({site:location.hostname.replace(/^www\\./,'').split('.')[0],lines:L});const done=()=>alert('BudDeals: copied '+L.length+' reward lines. Paste them into your Wallet tab.');navigator.clipboard?navigator.clipboard.writeText(t).then(done,()=>prompt('Copy this, then paste into BudDeals Wallet:',t)):prompt('Copy this:',t)})()`;
-$('#bm').href = 'javascript:' + encodeURIComponent(BM);
-$('#bm').onclick = e => { e.preventDefault(); toast('Drag that button to your bookmarks bar — it only works on a rewards page.'); };
-$('#copybm').onclick = async e => { e.preventDefault(); try { await navigator.clipboard.writeText('javascript:' + encodeURIComponent(BM)); toast('Bookmark code copied'); } catch {} };
+$('#wopen').onclick = () => { const u = $('#wsite').value.trim(); if (!u) return toast('Enter or pick the dispensary website'); api().open_login(u); };
+$('#wread').onclick = async () => {
+  const r = await api().read_rewards();
+  if (r.error) return toast(r.error);
+  if (!r.lines.length) return toast('Didn’t see any points or offers on that page — open your rewards page and try again.');
+  $('#wpaste').value = r.lines.join('\n');
+  if (!$('#wstore').value) $('#wstore').value = r.site;
+  $('#wadd').click();
+  toast('Rewards read and saved on this PC.');
+};
+$('#wclear').onclick = async () => toast((await api().clear_logins()) ? 'Signed out of all dispensary sites.' : 'Couldn’t clear sign-ins.');
+$('#refresh').onclick = () => S.center ? locate(S.center, true) : toast('Pick a location first');
+async function checkUpdate() {
+  const u = await api().check_update(); if (!u) return;
+  $('#update').innerHTML = `<div class="banner">⬆️ BudDeals ${esc(u.version)} is available. <button class="pri" id="upd">Update now</button> <button id="updlater">Later</button>${u.notes ? `<div class="meta" style="margin-top:6px;white-space:pre-wrap">${esc(u.notes)}</div>` : ''}</div>`;
+  $('#upd').onclick = async () => { toast('Downloading update…'); const r = await api().install_update(); if (r.error) toast(r.error); };
+  $('#updlater').onclick = () => { $('#update').innerHTML = ''; };
+}
 
 // ---------- start ----------
-const gh = repo();
-if (gh) $('#ghlinks').innerHTML = ` · <a target="_blank" href="https://github.com/${gh}/actions/workflows/scan.yml">Scan for new deals now</a>`;
 $('#q').value = S.q || ''; $('#radius').value = S.radius; $('#rv').textContent = S.radius; $('#sort').value = S.sort;
 $('#today').checked = S.today; $('#hidenew').checked = S.hidenew; $('#favonly').checked = S.favonly;
 $('#budget').value = S.budget; $('#tax').value = S.tax; $('#gas').value = S.gas;
-try { DATA = await (await fetch('data/deals.json?' + Date.now())).json(); } catch {}
-$('#updated').textContent = DATA.updated ? `deals scanned ${ago(DATA.updated)}` : 'deals not scanned yet';
+$('#updated').textContent = '';
+api().version().then(v => { $('#ver').textContent = ' · BudDeals v' + v; });
+checkUpdate();
 render();
 if (S.q && !S.center) search(); else if (S.center) locate(S.center);
 </script>
