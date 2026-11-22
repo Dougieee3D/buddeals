@@ -230,28 +230,40 @@ function renderPlaces() {
 }
 function renderPlan() {
   const B = +S.budget || 0;
-  if (!B) { $('#plan').innerHTML = '<div class="card">Enter how much you want to spend today and I’ll rank where your money goes furthest.</div>'; return; }
+  if (!B) { $('#plan').innerHTML = '<div class="card">Enter how much you want to spend today. For every store I’ll build the best cart that fits it — sale items first, then the cheapest per gram — and rank the stores by how much you get.</div>'; return; }
   const pay = B / (1 + (+S.tax || 0) / 100);
   const rows = DISPS.filter(d => !S.favonly || favs.has(d.id)).map(d => {
-    const opts = d.parsed.filter(p => !p.expired && appliesToday(p) && !(S.hidenew && p.newOnly) && matchesCat(p, S.cat));
     const rewards = d.wallet.reduce((s, w) => s + (w.dollars || 0) + (w.points || 0) * (w.ppv || 0), 0);
-    let best = { retail: pay, p: null };
-    for (const p of opts) { const r = retailFor(p, pay); if (r && r > best.retail) best = { retail: r, p }; }
-    const retail = best.retail + rewards, gas = 2 * d.dist * (+S.gas || 0), saved = retail - pay, net = saved - gas;
-    const prods = (d.products || []).filter(x => matchesCat(x, S.cat)).sort((a, b) => a.price - b.price);
-    const cart = []; let left = retail;
-    for (const x of prods) if (x.price <= left) { cart.push(x); left -= x.price; if (cart.length >= 8) break; }
-    const notes = opts.filter(p => p.kind === 'bundle' || p.kind === 'price');
-    return { d, best, rewards, retail, gas, saved, net, cart, notes };
-  }).filter(r => r.best.p || r.rewards || r.notes.length).sort((a, b) => b.net - a.net);
-  $('#plan').innerHTML = rows.length ? rows.slice(0, 60).map((r, i) => `<div class="card">${star(r.d)}<span class="rank">#${i + 1}</span><b>${esc(r.d.name)}</b> <span class="meta">${r.d.dist.toFixed(1)} mi</span>
-    <div style="margin:6px 0"><span class="big">${money(r.retail)}</span> <span class="meta">of product for ${money(B)}</span></div>
-    ${r.best.p ? `<div class="dtext">Using: <b>${esc(r.best.p.label)}</b>${r.best.p.yours ? ' <span class="tag you">your offer</span>' : ''} — ${esc(r.best.p.text)}</div>` : ''}
+    const deals = d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && !(S.hidenew && p.newOnly) && matchesCat(p, S.cat));
+    const cand = (d.products || []).filter(x => matchesCat({ cats: x.cats || ['all'] }, S.cat))
+      .map(x => ({ ...x, pct: x.was ? 1 - x.price / x.was : 0, ppg: x.grams ? x.price / x.grams : null }))
+      .sort((a, b) => (b.pct >= 0.01) - (a.pct >= 0.01) || b.pct - a.pct || (a.ppg ?? 1e9) - (b.ppg ?? 1e9) || a.price - b.price);
+    const cart = [], names = new Set(); let spent = 0;
+    for (const x of cand) {
+      if (cart.length >= 15) break;
+      const k = x.name.toLowerCase();
+      if (names.has(k) || spent + x.price > pay + 0.001) continue;
+      cart.push(x); names.add(k); spent += x.price;
+    }
+    let worth = cart.reduce((s, x) => s + (x.was || x.price), 0), best = null;
+    if (!cart.length) { // no menu prices: fall back to the store's written deals
+      worth = pay; spent = pay;
+      for (const p of deals) { const r = retailFor(p, pay); if (r && r > worth) { worth = r; best = p; } }
+    } else best = deals.filter(p => p.kind === 'tier' || p.kind === 'pct').sort((a, b) => b.score - a.score)[0] || null;
+    const gas = 2 * d.dist * (+S.gas || 0), saved = worth - spent + rewards, net = saved - gas;
+    return { d, cart, spent, worth, best, rewards, gas, saved, net };
+  }).filter(r => r.cart.length || (r.best && r.worth > r.spent) || r.rewards).sort((a, b) => b.net - a.net || b.cart.length - a.cart.length);
+  $('#plan').innerHTML = rows.length ? rows.slice(0, 40).map((r, i) => `<div class="card">${star(r.d)}<span class="rank">#${i + 1}</span><b>${esc(r.d.name)}</b> <span class="meta">${r.d.dist.toFixed(1)} mi</span>
+    ${r.cart.length ? `<div style="margin:6px 0"><span class="big">${r.cart.length} items · ${money(r.spent)}</span><br><span class="meta">normally ${money(r.worth)} — you save <b style="color:var(--acc)">${money(r.worth - r.spent)}</b>${S.tax > 0 ? ' (before tax)' : ''}</span></div>
+      <table>${r.cart.map(x => `<tr><td>${esc(x.name)}${x.grams ? ` <span class="meta">${x.grams}g</span>` : ''}</td><td style="text-align:right;white-space:nowrap">${money(x.price)}${x.was ? ` <s class="meta">${money(x.was)}</s>` : ''}</td></tr>`).join('')}</table>
+      ${r.best ? `<div class="meta" style="margin-top:6px">Also ask about: <b>${esc(r.best.label)}</b> — ${esc(r.best.text)} (may not stack with sale prices)</div>` : ''}`
+    : `<div style="margin:6px 0"><span class="big">${money(r.worth)}</span> <span class="meta">of product for ${money(B)}</span></div>${r.best ? `<div class="dtext">Using: <b>${esc(r.best.label)}</b> — ${esc(r.best.text)}</div>` : ''}<div class="meta">No menu prices read for this store — open its menu to pick items.</div>`}
     ${r.rewards ? `<div class="meta">+ ${money(r.rewards)} from your rewards/points</div>` : ''}
-    ${r.notes.map(n => `<div class="meta">Also: ${esc(n.label)}${n.unitPrice ? ` (${money(n.unitPrice)} each)` : ''}</div>`).join('')}
-    <div class="meta">Save ~${money(r.saved)} · gas ~${money(r.gas)} · <b style="color:${r.net >= 0 ? 'var(--acc)' : 'var(--bad)'}">net ${money(r.net)}</b></div>
-    ${r.cart.length ? `<table>${r.cart.map(x => `<tr><td>${esc(x.name)}</td><td style="text-align:right">${money(x.price)}</td></tr>`).join('')}</table>` : ''}
-    <div class="acts">${links(r.d)}</div></div>`).join('') : '<div class="card">No usable deals for this budget and category nearby today. Try a bigger radius or another category.</div>';
+    <div class="meta">Gas ~${money(r.gas)} · <b style="color:${r.net >= 0 ? 'var(--acc)' : 'var(--bad)'}">net savings ${money(r.net)}</b></div>
+    <div class="acts">${links(r.d)}<button data-copycart="${i}">Copy list</button></div></div>`).join('') : '<div class="card">No menus or deals read for this area yet. Hit 🔄 Refresh, or try a bigger radius or another category.</div>';
+  $('#plan').onclick = async e => { const b = e.target.closest('[data-copycart]'); if (!b) return; const r = rows[+b.dataset.copycart];
+    const txt = `${r.d.name} — ${money(r.spent)}\n` + r.cart.map(x => `• ${x.name} ${money(x.price)}`).join('\n');
+    try { await navigator.clipboard.writeText(txt); toast('Shopping list copied'); } catch {} };
 }
 function renderWallet() {
   $('#wallet').innerHTML = wallet.map((w, i) => `<div class="card"><b>${esc(w.store)}</b> <span class="meta">updated ${ago(w.updated)}</span>
@@ -278,7 +290,15 @@ function ago(iso) { if (!iso) return ''; const m = (Date.now() - new Date(iso)) 
 function toast(t) { $('#status').textContent = t; }
 
 function banner() {
-  $('#banner').innerHTML = S.center ? '' : '<div class="banner">Type a ZIP/city or tap 📍 Me to start.</div>';
+  if (S.agree === undefined) {
+    $('#banner').innerHTML = `<div class="banner">To read dispensary menus, BudDeals answers each site's “Are you 18+/21+ or a patient?” and “I agree to the site's terms” screens for you, the same as you'd click them yourself.
+      <div class="acts"><button class="pri" id="agreeY">Allow — I'm of legal age / a patient</button><button id="agreeN">Not now</button></div></div>`;
+    $('#agreeY').onclick = () => { S.agree = true; render(); if (S.center) locate(S.center, true); };
+    $('#agreeN').onclick = () => { S.agree = false; render(); };
+    return;
+  }
+  $('#banner').innerHTML = S.center ? (S.agree ? '' : '<div class="banner">Menus behind age/terms screens are skipped. <button id="agreeY">Allow BudDeals to answer them</button></div>') : '<div class="banner">Type a ZIP/city or tap 📍 Me to start.</div>';
+  const y = $('#agreeY'); if (y) y.onclick = () => { S.agree = true; render(); locate(S.center, true); };
 }
 
 function render() {
@@ -298,14 +318,14 @@ async function locate(center, force = false) {
   if (scanning) return; scanning = true;
   S.center = center; save(); toast(`Finding dispensaries near ${center.label}… (first scan of a new area can take a minute)`);
   try {
-    const r = await api().scan(center.lat, center.lon, S.radius, force);
+    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree);
     LIVE = r.dispensaries || []; DATA.updated = r.updated;
     $('#updated').textContent = r.updated ? `deals read ${ago(r.updated)}` : '';
     render();
     if (r.error) toast(r.error);
   } finally { scanning = false; }
 }
-window.onScanProgress = (done, total) => toast(`Reading dispensary deal pages… ${done}/${total}`);
+window.onScanProgress = (done, total) => toast(`Reading dispensary menus… ${done}/${total} sites done (each site takes up to a minute)`);
 async function search() {
   const q = $('#q').value.trim(); if (!q) return;
   toast('Looking up ' + q + '…');

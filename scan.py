@@ -168,6 +168,7 @@ def _to_disp(e):
         "website": t.get("website") or t.get("contact:website") or t.get("url")
         or next((u for rx, u in CHAIN_SITES if re.search(rx, t.get("name") or t.get("brand") or "", re.I)), ""),
         "phone": t.get("phone") or t.get("contact:phone") or "", "hours": t.get("opening_hours") or "",
+        "city": t.get("addr:city") or "",
     }
 
 
@@ -247,6 +248,15 @@ def extract(page, base):
     return {"deals": deals, "links": links[:3], "products": products}
 
 
+def area_of(lat, lon):
+    """State name + ZIP for answering a site's 'pick your state / store' screens."""
+    try:
+        a = _json(f"https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat={lat}&lon={lon}").get("address", {})
+        return {"state": a.get("state", ""), "zip": (a.get("postcode") or "")[:5], "city": a.get("city") or a.get("town") or a.get("village") or ""}
+    except Exception:
+        return {"state": "", "zip": "", "city": ""}
+
+
 def _product(x, src):
     try:
         price = float(x.get("price") or 0)
@@ -259,15 +269,19 @@ def _product(x, src):
     m = re.search(r"(\d{1,2})\s*%", x.get("tag") or "")
     if not was and m and 5 <= int(m.group(1)) < 90:
         was = round(price / (1 - int(m.group(1)) / 100), 2)
-    return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats_of(name), "grams": grams_of(name), "src": src}
+    cats = cats_of(name)
+    if cats == ["all"]:
+        cats = cats_of(urllib.parse.unquote(urllib.parse.urlparse(src).path).replace("-", " ").replace("/", " "))
+    return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats,
+            "grams": grams_of(name) or grams_of(str(x.get("size") or "")), "src": src}
 
 
-def read_site(website, reader=None):
+def read_site(website, reader=None, ctx=None):
     """reader(url) -> {url, lines, items, links} from a real (hidden) browser; falls back to a plain download."""
     base = website if re.match(r"https?:", website, re.I) else "https://" + website
     pages, seen, deals, products, ok = [base], set(), [], [], False
     i = 0
-    while i < len(pages) and i < 4:
+    while i < len(pages) and i < (9 if reader else 4):
         url = pages[i]
         i += 1
         if url in seen:
@@ -275,7 +289,7 @@ def read_site(website, reader=None):
         seen.add(url)
         try:
             if reader:
-                r = reader(url) or {}
+                r = reader(url, ctx) or {}
                 final = r.get("url") or url
                 lines, links = r.get("lines") or [], r.get("links") or []
                 prods = [p for p in (_product(x, final) for x in r.get("items") or []) if p]
@@ -291,32 +305,36 @@ def read_site(website, reader=None):
             deals += [{"text": t, "src": final} for t in lines]
             products += prods
             if len(seen) == 1:
-                pages += links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")]
+                pages += links[:8] if reader else links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")]
         except Exception:
             pass
     uniq = list({d["text"].lower(): d for d in deals}.values())[:30]
-    prods = list({(p["name"].lower(), p["price"]): p for p in products}.values())[:150]
+    prods = list({(p["name"].lower(), p["price"]): p for p in products}.values())[:600]
     return ok, {"t": time.time(), "deals": uniq, "products": prods}
 
 
-def scan(lat, lon, miles, force=False, progress=None, reader=None):
+def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False):
     with _lock:
         cache = _load()
     disps, note = dispensaries(lat, lon, miles, cache, force)
     for d in disps:
         if not d["website"]:
             d["website"] = next((u for rx, u in CHAIN_SITES if re.search(rx, d["name"], re.I)), "")
-    sites = {}
+    area = area_of(lat, lon) if reader else {}
     for d in disps:
+        d["_dist"] = (d["lat"] - lat) ** 2 + (d["lon"] - lon) ** 2
+    sites, ctxs = {}, {}
+    for d in sorted(disps, key=lambda x: x["_dist"]):
         h = host_of(d["website"]) if d["website"] else ""
         if h and h not in sites:
             sites[h] = d["website"]
+            ctxs[h] = {**area, "city": d.get("city") or area.get("city", ""), "agree": agree}
     todo = [(h, w) for h, w in sites.items() if force or time.time() - cache["sites"].get(h, {}).get("t", 0) > SITE_TTL]
     done = 0
     if progress and todo:
         progress(0, len(todo))
     with cf.ThreadPoolExecutor(max_workers=3 if reader else 8) as pool:
-        futs = {pool.submit(read_site, w, reader): h for h, w in todo}
+        futs = {pool.submit(read_site, w, reader, ctxs.get(h)): h for h, w in todo}
         for f in cf.as_completed(futs):
             h = futs[f]
             try:
@@ -334,6 +352,7 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None):
     out = []
     for d in disps:
         s = cache["sites"].get(host_of(d["website"]), {}) if d["website"] else {}
+        d.pop("_dist", None)
         out.append({**d, "deals": s.get("deals", []), "products": s.get("products", []), "stale": s.get("stale", False),
                     "checked": datetime.fromtimestamp(s["t"], timezone.utc).isoformat() if s.get("t") else None})
     with _lock:

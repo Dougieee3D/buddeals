@@ -14,7 +14,7 @@ import webview
 
 import scan
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -24,8 +24,32 @@ STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
 READ_REWARDS_JS = r"""(()=>{const L=document.body.innerText.split(/\n+/).map(s=>s.trim()).filter(s=>s.length>2&&s.length<200&&/(point|pts|reward|\$|%|off|birthday|coupon|offer|free|credit|voucher)/i.test(s)&&!/@|\d{3}[-. )]+\d{3}[-. ]\d{4}/.test(s)).slice(0,60);return JSON.stringify({site:location.hostname.replace(/^www\./,'').split('.')[0],lines:L})})()"""
 
 
-# Clicks "Yes / I'm 21 / I'm a patient" age gates so the menu shows.
-AGE_JS = r"""(()=>{if(!/(21|age verification|verify your age|patient|over the age|of legal age)/i.test(document.body.innerText))return 0;let n=0;for(const b of document.querySelectorAll('button,a,[role=button],input[type=submit]')){const t=(b.innerText||b.value||'').replace(/\s+/g,' ').trim().toLowerCase();if(t.length<45&&/^(yes|enter|i am 21|i'm 21|i am over|i'm over|i am a (medical )?patient|i'm a (medical )?patient|i agree|agree|confirm)/.test(t)){try{b.click();n++}catch(e){}}if(n>2)break}return n})()"""
+# Gets past "pick your state", "are you 21 / a patient" and "pick your store" screens like a person would.
+# Cookie banners: only ever clicks a reject/decline option. Returns what it did ('' when nothing was in the way).
+GATE_JS = r"""((STATE,ZIP,CITY,AGREE)=>{const T=s=>(s||'').replace(/\s+/g,' ').trim();const body=T(document.body.innerText).toLowerCase();
+const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};const click=e=>{try{e.click();return true}catch(x){return false}};
+const cl=()=>[...document.querySelectorAll('button,a,[role=button],[role=option],input[type=submit]')].filter(vis);let did=[];
+for(const b of cl()){if(/^(reject|reject all|decline|deny|necessary only|only necessary|reject non-essential)$/.test(T(b.innerText).toLowerCase())){click(b);break}}
+if(STATE&&/(select|choose|pick) (your |a )?state|which state/.test(body)){const st=STATE.toLowerCase();
+ const sel=[...document.querySelectorAll('select')].find(x=>[...x.options].some(o=>T(o.text).toLowerCase()===st));
+ if(sel){const o=[...sel.options].find(o=>T(o.text).toLowerCase()===st);if(sel.value!==o.value){sel.value=o.value;sel.dispatchEvent(new Event('change',{bubbles:true}));did.push('state')}}
+ else{const opt=[...document.querySelectorAll('[role=option],li,button,a,span,div,p')].filter(vis).find(e=>e.children.length<3&&T(e.innerText).toLowerCase()===st);
+  if(opt){click(opt);did.push('state')}else{const cb=[...document.querySelectorAll('[role=combobox],[aria-haspopup],select')].filter(vis)[0];if(cb){click(cb);did.push('open-state')}}}}
+if(AGREE){for(const c of [...document.querySelectorAll('input[type=checkbox]')].filter(x=>!x.checked)){const l=T((c.labels&&c.labels[0]&&c.labels[0].innerText)||((c.closest('label')||c.parentElement||{}).innerText)||'').toLowerCase();if(/(18|21|age|agree|terms|patient)/.test(l)){click(c);did.push('check')}}}
+if(AGREE&&/(21|18|age verification|verify your age|patient|over the age|of legal age|are you (over|at least|a))/.test(body)){for(const b of cl()){const t=T(b.innerText||b.value).toLowerCase();if(t.length<45&&/^(yes|enter|i am 21|i'm 21|i am 18|i'm 18|i am over|i'm over|i am a (medical )?patient|i'm a (medical )?patient|i agree|agree|confirm|yes,? i)/.test(t)){click(b);did.push('age');break}}}
+if(/(select|choose|find|pick) (a |your )?(location|store|dispensary)|shop here|select (a )?store|set (as )?(my )?store/.test(body)){
+ const re=/^(shop here|select store|select this store|select|choose|choose store|choose this store|set (as )?(my )?store|shop this (store|location)|start shopping|shop now|order here|make this my store)$/;
+ const btns=cl().filter(b=>re.test(T(b.innerText).toLowerCase()));let pick=null;
+ const cardOf=b=>{let c=b;while(c.parentElement&&btns.filter(x=>c.parentElement.contains(x)).length<2)c=c.parentElement;return c};
+ if(CITY){const c0=CITY.toLowerCase();pick=btns.find(b=>T(cardOf(b).innerText).toLowerCase().includes(c0))||null}
+ if(!pick){const inp=[...document.querySelectorAll('input')].filter(vis).find(i=>/zip|city|address|location|postal/i.test((i.placeholder||'')+' '+(i.name||'')+' '+(i.getAttribute('aria-label')||'')));
+  if(inp&&ZIP&&inp.value!==ZIP){const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(inp,ZIP);inp.dispatchEvent(new Event('input',{bubbles:true}));
+   inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,bubbles:true}));const sb=inp.parentElement&&inp.parentElement.querySelector('button');if(sb)click(sb);did.push('store-search')}
+  else if(btns.length)pick=btns[0]}
+ if(pick){click(pick);did.push('store')}}
+return did.join(',')})"""
+
+LOAD_MORE_JS = r"""(()=>{const b=[...document.querySelectorAll('button,a,[role=button]')].find(e=>{const r=e.getBoundingClientRect();return r.width>0&&/^(load|show|view|see) more( products| items)?$/i.test((e.innerText||'').trim())});if(b){b.scrollIntoView();b.click();return true}window.scrollTo(0,document.body.scrollHeight);return false})()"""
 
 # Reads deal lines, product cards (price + crossed-out price) and menu/deal links from the rendered page.
 EXTRACT_JS = r"""(()=>{const T=s=>(s||'').replace(/\s+/g,' ').trim();
@@ -42,10 +66,11 @@ for(const leaf of [...document.querySelectorAll('body *')].filter(isPrice).slice
  if(!vals.length)continue;const now=vals.filter(x=>!x.s).map(x=>x.v),was=vals.filter(x=>x.s).map(x=>x.v);
  const price=now.length?Math.min(...now):Math.min(...vals.map(x=>x.v));const wasP=was.length?Math.max(...was):null;
  const name=t.split(/\n+/).map(T).filter(s=>s.length>3&&s.length<140&&!/\$|add to (cart|bag)|^\d+\s*%|^(sale|new|qty|quantity|in stock|sold out)/i.test(s)).sort((a,b)=>b.length-a.length)[0]||'';
- if(!name)continue;items.push({name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0])});if(items.length>=150)break}
+ if(!name)continue;items.push({name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0])});if(items.length>=400)break}
 const host=location.hostname;const links=[...document.querySelectorAll('a[href]')].map(a=>({h:a.href.split('#')[0],t:T(a.innerText).toLowerCase()})).filter(x=>{try{return new URL(x.h).hostname===host&&x.h!==location.href}catch(e){return false}});
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
-return JSON.stringify({url:location.href,lines,items,links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/shop|menu|order|products/)])].slice(0,4)})})()"""
+const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
+return JSON.stringify({url:location.href,lines,items,links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
 
 
 class BrowserReader:
@@ -61,18 +86,34 @@ class BrowserReader:
             self.wins.append(w)
             self.pool.put((w, ev))
 
-    def __call__(self, url):
+    def __call__(self, url, ctx=None):
+        ctx = ctx or {}
         w, ev = self.pool.get()
         try:
             ev.clear()
             w.load_url(url)
             ev.wait(25)
             time.sleep(3)
-            if w.evaluate_js(AGE_JS):
+            args = json.dumps([ctx.get("state", ""), ctx.get("zip", ""), ctx.get("city", ""), bool(ctx.get("agree"))])[1:-1]
+            last = None
+            for _ in range(6):  # gates can come one after another (state -> age -> store)
+                did = w.evaluate_js(f"{GATE_JS}({args})")
+                if not did or did == last:
+                    break
+                last = did
                 time.sleep(3)
-            for _ in range(5):
-                w.evaluate_js("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(0.8)
+            cur = w.get_current_url() or ""
+            if cur and cur.rstrip("/") != url.rstrip("/") and "deals" not in url:
+                ev.clear()
+                w.load_url(url)  # the store picker may have sent us elsewhere; come back to the page we wanted
+                ev.wait(25)
+                time.sleep(3)
+            for _ in range(8):
+                if not w.evaluate_js(LOAD_MORE_JS):
+                    time.sleep(0.8)
+                    if not w.evaluate_js(LOAD_MORE_JS):
+                        break
+                time.sleep(2)
             return json.loads(w.evaluate_js(EXTRACT_JS) or "{}")
         except Exception:
             return {}
@@ -129,7 +170,7 @@ class Api:
     def locate_me(self):
         return scan.locate_me()
 
-    def scan(self, lat, lon, miles, force=False):
+    def scan(self, lat, lon, miles, force=False, agree=False):
         def progress(done, total):
             try:
                 main.evaluate_js(f"window.onScanProgress && window.onScanProgress({done},{total})")
@@ -141,7 +182,7 @@ class Api:
         except Exception:
             reader = None
         try:
-            return scan.scan(float(lat), float(lon), float(miles), bool(force), progress, reader)
+            return scan.scan(float(lat), float(lon), float(miles), bool(force), progress, reader, bool(agree))
         except Exception as e:
             return {"dispensaries": [], "updated": None, "error": f"Scan failed: {e}"}
         finally:
