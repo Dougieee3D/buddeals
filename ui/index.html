@@ -311,12 +311,14 @@ document.addEventListener('click', e => {
   if (t.dataset.mdel) { manual.splice(+t.dataset.mdel, 1); ls.set('manual', manual); }
   render();
 });
-$('#go').onclick = search; $('#q').onkeydown = e => e.key === 'Enter' && search();
-$('#geo').onclick = () => {
-  if (!navigator.geolocation) return toast('Location not available in this browser');
-  toast('Getting your location…');
-  navigator.geolocation.getCurrentPosition(async p => { const { latitude: lat, longitude: lon } = p.coords; S.q = ''; $('#q').value = ''; history.replaceState(null, '', location.pathname); await locate({ lat, lon, label: await reverse(lat, lon) }); },
-    () => toast('Location blocked — type a ZIP instead'), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+$('#go').onclick = search; $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+$('#geo').onclick = async () => {
+  toast('Finding your location…');
+  const g = await api().locate_me();
+  if (!g) return toast('Couldn’t find your location — type a ZIP or address instead.');
+  S.q = ''; $('#q').value = '';
+  await locate(g);
+  if (g.approx) toast(`Using approximate location (${g.label}). Turn on Windows location for exact results, or type your ZIP.`);
 };
 let rt; $('#radius').oninput = e => { S.radius = +e.target.value; $('#rv').textContent = S.radius; clearTimeout(rt); rt = setTimeout(() => S.center && locate(S.center), 600); };
 $('#sort').onchange = e => { S.sort = e.target.value; render(); };

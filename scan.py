@@ -90,6 +90,37 @@ def reverse(lat, lon):
         return "your location"
 
 
+WIN_LOCATION_PS = (
+    "Add-Type -AssemblyName System.Device;"
+    "$w=New-Object System.Device.Location.GeoCoordinateWatcher;$w.Start();$t=0;"
+    "while(($w.Status -ne 'Ready') -and ($w.Permission -ne 'Denied') -and $t -lt 100){Start-Sleep -Milliseconds 100;$t++};"
+    "$c=$w.Position.Location;if($c.IsUnknown){'none'}else{\"$($c.Latitude),$($c.Longitude)\"}"
+)
+
+
+def locate_me():
+    """Windows location first (exact, if Location is on in Windows settings), then IP-based (city-level)."""
+    if os.name == "nt":
+        try:
+            import subprocess
+            out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", WIN_LOCATION_PS], capture_output=True,
+                                 text=True, timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+            if "," in out:
+                lat, lon = (float(x) for x in out.split(",")[:2])
+                return {"lat": lat, "lon": lon, "label": reverse(lat, lon)}
+        except Exception:
+            pass
+    for url in ("https://ipwho.is/", "https://ipapi.co/json/"):
+        try:
+            j = _json(url)
+            lat, lon = float(j["latitude"]), float(j["longitude"])
+            label = ", ".join(x for x in [j.get("city"), j.get("region_code") or j.get("region")] if x) or "your area"
+            return {"lat": lat, "lon": lon, "label": label, "approx": True}
+        except Exception:
+            pass
+    return None
+
+
 def overpass_query(lat, lon, miles):
     r = round(miles * 1609.34)
     a = f"(around:{r},{lat},{lon})"

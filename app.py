@@ -12,7 +12,7 @@ import webview
 
 import scan
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -60,6 +60,9 @@ class Api:
 
     def reverse(self, lat, lon):
         return scan.reverse(lat, lon)
+
+    def locate_me(self):
+        return scan.locate_me()
 
     def scan(self, lat, lon, miles, force=False):
         def progress(done, total):
