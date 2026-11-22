@@ -17,8 +17,8 @@ export function overpassQuery(lat, lon, miles) {
   return `[out:json][timeout:60];(nwr["shop"="cannabis"](around:${r},${lat},${lon});nwr["name"~"${NAME_RX}",i]["shop"](around:${r},${lat},${lon});nwr["name"~"${NAME_RX}",i]["healthcare"](around:${r},${lat},${lon});nwr["name"~"${NAME_RX}",i]["amenity"](around:${r},${lat},${lon}););out center tags;`;
 }
 
-async function get(url, opts = {}) {
-  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), TIMEOUT);
+async function get(url, opts = {}, ms = TIMEOUT) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
   try { return await fetch(url, { ...opts, signal: ctl.signal, headers: { 'user-agent': UA, ...(opts.headers || {}) }, redirect: 'follow' }); }
   finally { clearTimeout(t); }
 }
@@ -26,7 +26,7 @@ async function get(url, opts = {}) {
 async function overpass(lat, lon, miles) {
   for (const ep of OVERPASS) {
     try {
-      const res = await get(ep, { method: 'POST', body: 'data=' + encodeURIComponent(overpassQuery(lat, lon, miles)), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const res = await get(ep, { method: 'POST', body: 'data=' + encodeURIComponent(overpassQuery(lat, lon, miles)), headers: { 'content-type': 'application/x-www-form-urlencoded' } }, 90000);
       if (res.ok) return (await res.json()).elements;
     } catch (e) { console.warn('overpass fail', ep, e.message); }
   }
