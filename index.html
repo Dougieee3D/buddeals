@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1712">
+<title>BudDeals – best dispensary deals near you</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#0f1712;--card:#17231b;--line:#25382b;--txt:#e8f3ea;--dim:#93a898;--acc:#5ee08a;--acc2:#ffd54a;--bad:#ff7a7a;--you:#b28cff}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+a{color:var(--acc)}header{position:sticky;top:0;z-index:20;background:#0f1712f2;backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 14px}
+h1{margin:0 0 8px;font-size:20px}h1 small{color:var(--dim);font-weight:400;font-size:12px;margin-left:6px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,button,textarea{font:inherit;color:var(--txt);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+textarea{width:100%;min-height:80px}button{cursor:pointer}button.pri{background:var(--acc);color:#06210f;border:0;font-weight:700}
+#q{flex:1;min-width:170px}.chips{display:flex;gap:6px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:none}
+.chip{white-space:nowrap;border-radius:99px;padding:5px 12px;font-size:13px}.chip.on{background:var(--acc);color:#06210f;border-color:var(--acc);font-weight:700}
+.tabs{display:flex;gap:4px;margin-top:8px;overflow-x:auto}.tab{border:0;background:none;color:var(--dim);padding:6px 10px;border-radius:8px}.tab.on{background:var(--card);color:var(--txt)}
+main{max-width:980px;margin:auto;padding:12px 14px 80px}.status{color:var(--dim);font-size:13px;margin:4px 0 10px}
+.banner{background:#2a2410;border:1px solid #5a4a12;color:#ffe9a3;padding:10px 12px;border-radius:12px;margin-bottom:12px;font-size:14px}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(290px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;position:relative}
+.badge{display:inline-block;font-weight:800;font-size:18px;color:var(--acc2)}.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;background:#22352a;color:var(--dim);margin:2px 4px 2px 0}
+.tag.today{background:#1e4a2c;color:var(--acc)}.tag.warn{background:#4a1e1e;color:var(--bad)}.tag.you{background:#33244f;color:var(--you)}
+.dtext{margin:6px 0;font-size:14px}.meta{color:var(--dim);font-size:13px}.acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.acts a,.acts button{font-size:12px;padding:5px 9px;border-radius:8px;background:#203226;border:1px solid var(--line);text-decoration:none;color:var(--txt)}
+.star{position:absolute;top:8px;right:10px;background:none;border:0;font-size:20px;padding:0;color:var(--dim)}.star.on{color:var(--acc2)}
+.rank{font-size:12px;color:var(--dim);margin-right:6px}label{font-size:13px;color:var(--dim)}
+.form{display:grid;gap:10px;max-width:620px}.form label{display:grid;gap:4px}
+#map{height:65vh;border-radius:14px;border:1px solid var(--line)}.hide{display:none!important}
+.big{font-size:26px;font-weight:800;color:var(--acc)}table{width:100%;border-collapse:collapse;font-size:13px}td{padding:3px 0;border-bottom:1px solid var(--line)}
+footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}code{background:#203226;padding:1px 5px;border-radius:5px}
+.bm{display:inline-block;background:var(--you);color:#1a0d33;font-weight:700;padding:8px 14px;border-radius:10px;text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>🌿 BudDeals <small id="updated">loading…</small></h1>
+  <div class="row">
+    <input id="q" placeholder="ZIP, city, or address (anywhere)" autocomplete="postal-code">
+    <button class="pri" id="go">Search</button>
+    <button id="geo" title="Use my location">📍 Me</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>Radius <b id="rv">25</b> mi</label><input id="radius" type="range" min="5" max="150" step="5" value="25" style="flex:1;padding:0">
+    <select id="sort" title="Sort">
+      <option value="score">Best deal</option><option value="near">Best deal nearby</option><option value="dist">Closest</option>
+    </select>
+  </div>
+  <div class="chips" id="cats"></div>
+  <div class="row" style="font-size:13px">
+    <label><input type="checkbox" id="today" checked> Today only</label>
+    <label><input type="checkbox" id="hidenew" checked> Hide first-time-only</label>
+    <label><input type="checkbox" id="favonly"> ⭐ Favorites only</label>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+</header>
+<main>
+  <div id="banner"></div>
+  <div class="status" id="status"></div>
+  <section id="t-deals"><div class="grid" id="deals"></div></section>
+  <section id="t-budget" class="hide">
+    <div class="form">
+      <div class="row">
+        <label>💵 Budget today<input id="budget" type="number" min="0" step="5" placeholder="e.g. 150"></label>
+        <label>Tax %<input id="tax" type="number" min="0" step="0.5" value="0" style="width:80px"></label>
+        <label>Gas $/mile<input id="gas" type="number" min="0" step="0.01" value="0.15" style="width:90px"></label>
+      </div>
+      <div class="meta">Uses the category above. Counts your Wallet rewards/points at matching stores and subtracts round-trip gas. Assumes the deal covers your whole cart and spend thresholds are before the discount — always confirm in store.</div>
+    </div>
+    <div class="grid" id="plan" style="margin-top:12px"></div>
+  </section>
+  <section id="t-wallet" class="hide">
+    <div class="card" style="margin-bottom:12px">
+      <b>🔒 Your rewards stay on this device.</b> Nothing here is uploaded or shared, and BudDeals never asks for passwords.
+      <ol class="meta" style="margin:8px 0 0;padding-left:18px">
+        <li>Drag this button to your bookmarks bar (on a phone, bookmark this page, then edit the bookmark's URL and paste the code from <a href="#" id="copybm">here</a>): <a class="bm" id="bm" href="#">🌿 Grab my rewards</a></li>
+        <li>Log into your dispensary's site in your own browser and open your rewards/points page.</li>
+        <li>Tap the bookmark. It copies only point, reward and offer lines (emails/phone numbers are stripped).</li>
+        <li>Come back here and paste it below. Or just type it in yourself.</li>
+      </ol>
+    </div>
+    <div class="form">
+      <label>Paste from "Grab my rewards" (or type offers, one per line)<textarea id="wpaste" placeholder="You have 1,240 points&#10;$12 in rewards available&#10;Happy Birthday! 30% off one order"></textarea></label>
+      <div class="row">
+        <label>Store / chain name<input id="wstore" placeholder="e.g. Trulieve" list="dnames"></label>
+        <label>$ per point<input id="wppv" type="number" step="0.001" value="0.01" style="width:90px"></label>
+        <button class="pri" id="wadd">Add / update</button>
+      </div>
+    </div>
+    <div class="grid" id="wallet" style="margin-top:12px"></div>
+  </section>
+  <section id="t-places" class="hide"><div class="grid" id="places"></div></section>
+  <section id="t-map" class="hide"><div id="map"></div></section>
+  <section id="t-add" class="hide">
+    <div class="form">
+      <div class="meta">Saw a deal on Instagram, a text, or in store? Add it here (saved on this device) and it gets ranked with everything else.</div>
+      <label>Dispensary<input id="adisp" list="dnames" placeholder="Start typing a name"></label>
+      <label>Deal (type it how they wrote it)<input id="atext" placeholder="Spend $150 get 30% off concentrates thru 12/1"></label>
+      <div class="row"><button class="pri" id="aadd">Add deal</button><button id="aexp">Export my data</button><button id="aimp">Import</button></div>
+      <div id="apreview" class="meta"></div>
+    </div>
+    <div class="grid" id="manual" style="margin-top:12px"></div>
+  </section>
+  <datalist id="dnames"></datalist>
+</main>
+<footer>
+  Deals are read automatically from dispensaries' public websites and can be wrong or out of date. Confirm before you buy.
+  For adults 21+ or registered medical patients where it's legal. Don't drive impaired.<br>
+  Dispensary locations © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
+  <span id="ghlinks"></span>
+</footer>
+
+<script type="module">
+import { CATS, CAT_LABEL, parseDeal, parseRewards, appliesToday, matchesCat, retailFor } from './js/dealparse.mjs';
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ls = { get: (k, d) => { try { return JSON.parse(localStorage.getItem('bd_' + k)) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bd_' + k, JSON.stringify(v)); } catch {} } };
+const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const NAME_RX = 'dispensar|cannabis|marijuana|weed|Trulieve|Curaleaf|Sunnyside|Liberty Health|Fluent|M[UÜ]V|Surterra|Vidacann|Insa|RISE|Zen Leaf|AYR|GrowHealthy|Jungle Boys|Sanctuary|Flowery|Green Dragon|Cookies|Planet 13|Thrive|Cannabist|Beyond Hello|Verilife|Story Cannabis|Gold Flora';
+
+const S = Object.assign({ q: '', center: null, radius: 25, cat: 'all', sort: 'score', today: true, hidenew: true, favonly: false, budget: '', tax: 0, gas: 0.15, tab: 'deals' }, ls.get('settings', {}));
+const P = new URLSearchParams(location.search);
+if (P.get('q')) { S.q = P.get('q'); S.center = null; }
+if (P.get('r')) S.radius = +P.get('r');
+if (P.get('c')) S.cat = P.get('c');
+let favs = new Set(ls.get('favs', [])), manual = ls.get('manual', []), wallet = ls.get('wallet', []);
+let DATA = { dispensaries: [], regions: [] }, LIVE = [], DISPS = [], map, layer;
+const save = () => ls.set('settings', S);
+
+// ---------- geo ----------
+const hav = (a, b, c, d) => { const R = 3958.8, r = x => x * Math.PI / 180, dl = r(c - a), dn = r(d - b); const h = Math.sin(dl / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+async function geocode(q) {
+  if (/^\d{5}$/.test(q.trim())) {
+    const r = await fetch('https://api.zippopotam.us/us/' + q.trim());
+    if (r.ok) { const j = await r.json(), p = j.places[0]; return { lat: +p.latitude, lon: +p.longitude, label: `${p['place name']}, ${p['state abbreviation']} ${q}` }; }
+  }
+  const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
+  const j = await r.json();
+  if (!j[0]) throw new Error('Couldn’t find that place');
+  return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name.split(',').slice(0, 3).join(',') };
+}
+async function reverse(lat, lon) {
+  try { const j = await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${lat}&lon=${lon}`)).json(); const a = j.address || {}; return [a.city || a.town || a.village || a.county, a.state].filter(Boolean).join(', '); } catch { return 'your location'; }
+}
+async function overpass(c, miles) {
+  const key = `op_${c.lat.toFixed(2)}_${c.lon.toFixed(2)}_${miles}`, hit = ls.get(key);
+  if (hit && Date.now() - hit.t < 12 * 3600e3) return hit.d;
+  const r = Math.round(miles * 1609.34), a = `(around:${r},${c.lat},${c.lon})`;
+  const q = `[out:json][timeout:45];(nwr["shop"="cannabis"]${a};nwr["name"~"${NAME_RX}",i]["shop"]${a};nwr["name"~"${NAME_RX}",i]["healthcare"]${a};nwr["name"~"${NAME_RX}",i]["amenity"]${a};);out center tags;`;
+  for (const ep of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
+    try {
+      const res = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+      if (!res.ok) continue;
+      const d = (await res.json()).elements.map(e => { const t = e.tags || {}; return { id: `${e.type}/${e.id}`, name: t.name || t.brand || 'Dispensary', lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, address: [t['addr:housenumber'], t['addr:street'], t['addr:city'], t['addr:state']].filter(Boolean).join(' '), website: t.website || t['contact:website'] || '', phone: t.phone || t['contact:phone'] || '', hours: t.opening_hours || '', deals: [], products: [] }; }).filter(d => d.lat);
+      for (const k of Object.keys(localStorage)) if (k.startsWith('bd_op_') && k !== 'bd_' + key) localStorage.removeItem(k);
+      ls.set(key, { t: Date.now(), d });
+      return d;
+    } catch {}
+  }
+  return [];
+}
+
+// ---------- data ----------
+function walletFor(d) { const n = norm(d.name); return wallet.filter(w => { const s = norm(w.store); return s && (n.includes(s) || s.includes(n)); }); }
+function build() {
+  const now = new Date(), c = S.center, byId = new Map();
+  for (const d of LIVE) byId.set(d.id, { ...d });
+  for (const d of DATA.dispensaries) if (d.lat && (byId.has(d.id) || (c && hav(c.lat, c.lon, d.lat, d.lon) <= S.radius))) byId.set(d.id, { ...byId.get(d.id), ...d });
+  for (const m of manual) {
+    let d = [...byId.values()].find(x => norm(x.name) === norm(m.disp)) || [...byId.values()].find(x => norm(x.name).includes(norm(m.disp)));
+    if (!d && m.lat && c && hav(c.lat, c.lon, m.lat, m.lon) <= S.radius) { d = { id: 'manual:' + norm(m.disp), name: m.disp, lat: m.lat, lon: m.lon, deals: [], products: [] }; byId.set(d.id, d); }
+    if (d) d.deals = [...(d.deals || []), { text: m.text, manual: m.id }];
+  }
+  DISPS = [...byId.values()].map(d => {
+    const dist = c ? hav(c.lat, c.lon, d.lat, d.lon) : 0, w = walletFor(d);
+    const parsed = [...(d.deals || []).map(x => ({ ...parseDeal(x.text, now), src: x.src, manual: x.manual })),
+      ...w.flatMap(x => x.offers.map(o => ({ ...parseDeal(o, now), yours: true })))].filter(p => p.kind || p.yours);
+    return { ...d, dist, parsed, wallet: w };
+  }).filter(d => d.dist <= S.radius + 0.01).sort((a, b) => a.dist - b.dist);
+  $('#dnames').innerHTML = DISPS.map(d => `<option value="${esc(d.name)}">`).join('');
+}
+function visibleDeals() {
+  const out = [];
+  for (const d of DISPS) {
+    if (S.favonly && !favs.has(d.id)) continue;
+    for (const p of d.parsed) {
+      if (p.expired || (S.today && !appliesToday(p)) || (S.hidenew && p.newOnly) || !matchesCat(p, S.cat)) continue;
+      out.push({ d, p });
+    }
+  }
+  const near = x => x.p.score / (1 + x.d.dist / 15);
+  out.sort(S.sort === 'dist' ? (a, b) => a.d.dist - b.d.dist || b.p.score - a.p.score : S.sort === 'near' ? (a, b) => near(b) - near(a) : (a, b) => b.p.score - a.p.score || a.d.dist - b.d.dist);
+  return out;
+}
+
+// ---------- render ----------
+const links = d => `${d.website ? `<a target="_blank" rel="noopener" href="${esc(/^https?:/.test(d.website) ? d.website : 'https://' + d.website)}">Menu</a>` : ''}
+  <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lon}">Directions</a>
+  ${d.phone ? `<a href="tel:${esc(d.phone)}">Call</a>` : ''}`;
+const star = d => `<button class="star ${favs.has(d.id) ? 'on' : ''}" data-fav="${esc(d.id)}" title="Favorite">${favs.has(d.id) ? '★' : '☆'}</button>`;
+const dayName = i => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i];
+
+function renderDeals() {
+  const list = visibleDeals(), budget = +S.budget || 0;
+  $('#deals').innerHTML = list.length ? list.slice(0, 300).map(({ d, p }, i) => `
+    <div class="card">${star(d)}
+      <span class="rank">#${i + 1}</span><span class="badge">${esc(p.label)}</span>
+      <div>${p.cats.map(c => `<span class="tag">${esc(CAT_LABEL[c])}</span>`).join('')}
+        ${p.days ? `<span class="tag today">${p.days.map(dayName).join('/')}${appliesToday(p) ? ' · today' : ''}</span>` : ''}
+        ${p.yours ? '<span class="tag you">YOUR OFFER</span>' : ''}${p.manual ? '<span class="tag">added by you</span>' : ''}
+        ${p.groups.filter(g => !p.yours || g !== 'Members').map(g => `<span class="tag">${g}</span>`).join('')}
+        ${p.newOnly ? '<span class="tag warn">first-time only</span>' : ''}${p.expires ? `<span class="tag">ends ${p.expires.slice(5)}</span>` : ''}
+        ${budget && p.threshold && p.threshold * (1 - (p.pct || 0)) > budget ? `<span class="tag warn">needs ${money(p.threshold)} cart</span>` : ''}
+        ${d.stale ? '<span class="tag warn">site didn’t load last scan</span>' : ''}</div>
+      <div class="dtext">${esc(p.text)}</div>
+      <div class="meta"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}</div>
+      <div class="acts">${links(d)}${p.src ? `<a target="_blank" rel="noopener" href="${esc(p.src)}">Source</a>` : ''}<button data-share="${i}">Share</button></div>
+    </div>`).join('') : `<div class="card">No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found${S.today ? ' for today' : ''} within ${S.radius} mi. Try a bigger radius, turn off "Today only", check the <b>Places</b> tab for menus, or add a deal you saw.</div>`;
+  $('#deals').onclick = e => { const b = e.target.closest('[data-share]'); if (b) share(list[+b.dataset.share]); };
+}
+async function share({ d, p }) {
+  const text = `${p.label} at ${d.name} (${d.dist.toFixed(1)} mi): ${p.text}`;
+  try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('Copied!'); } } catch {}
+}
+function renderPlaces() {
+  $('#places').innerHTML = DISPS.filter(d => !S.favonly || favs.has(d.id)).map(d => {
+    const today = d.parsed.filter(p => !p.expired && appliesToday(p)).length;
+    const prods = (d.products || []).filter(x => matchesCat(x, S.cat)).sort((a, b) => a.price - b.price).slice(0, 5);
+    return `<div class="card">${star(d)}<b>${esc(d.name)}</b><div class="meta">${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}</div>
+      ${d.hours ? `<div class="meta">🕒 ${esc(d.hours)}</div>` : ''}
+      <div class="meta">${today ? `<span class="tag today">${today} deal${today > 1 ? 's' : ''} today</span>` : d.website ? 'No deals read from their site — check the menu' : 'No website listed'}
+      ${d.wallet.length ? '<span class="tag you">in your wallet</span>' : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
+      ${prods.length ? `<table>${prods.map(x => `<tr><td>${esc(x.name)}</td><td style="text-align:right">${money(x.price)}</td></tr>`).join('')}</table>` : ''}
+      <div class="acts">${links(d)}</div></div>`;
+  }).join('') || '<div class="card">No dispensaries found in this radius. Try a larger radius.</div>';
+}
+function renderPlan() {
+  const B = +S.budget || 0;
+  if (!B) { $('#plan').innerHTML = '<div class="card">Enter how much you want to spend today and I’ll rank where your money goes furthest.</div>'; return; }
+  const pay = B / (1 + (+S.tax || 0) / 100);
+  const rows = DISPS.filter(d => !S.favonly || favs.has(d.id)).map(d => {
+    const opts = d.parsed.filter(p => !p.expired && appliesToday(p) && !(S.hidenew && p.newOnly) && matchesCat(p, S.cat));
+    const rewards = d.wallet.reduce((s, w) => s + (w.dollars || 0) + (w.points || 0) * (w.ppv || 0), 0);
+    let best = { retail: pay, p: null };
+    for (const p of opts) { const r = retailFor(p, pay); if (r && r > best.retail) best = { retail: r, p }; }
+    const retail = best.retail + rewards, gas = 2 * d.dist * (+S.gas || 0), saved = retail - pay, net = saved - gas;
+    const prods = (d.products || []).filter(x => matchesCat(x, S.cat)).sort((a, b) => a.price - b.price);
+    const cart = []; let left = retail;
+    for (const x of prods) if (x.price <= left) { cart.push(x); left -= x.price; if (cart.length >= 8) break; }
+    const notes = opts.filter(p => p.kind === 'bundle' || p.kind === 'price');
+    return { d, best, rewards, retail, gas, saved, net, cart, notes };
+  }).filter(r => r.best.p || r.rewards || r.notes.length).sort((a, b) => b.net - a.net);
+  $('#plan').innerHTML = rows.length ? rows.slice(0, 60).map((r, i) => `<div class="card">${star(r.d)}<span class="rank">#${i + 1}</span><b>${esc(r.d.name)}</b> <span class="meta">${r.d.dist.toFixed(1)} mi</span>
+    <div style="margin:6px 0"><span class="big">${money(r.retail)}</span> <span class="meta">of product for ${money(B)}</span></div>
+    ${r.best.p ? `<div class="dtext">Using: <b>${esc(r.best.p.label)}</b>${r.best.p.yours ? ' <span class="tag you">your offer</span>' : ''} — ${esc(r.best.p.text)}</div>` : ''}
+    ${r.rewards ? `<div class="meta">+ ${money(r.rewards)} from your rewards/points</div>` : ''}
+    ${r.notes.map(n => `<div class="meta">Also: ${esc(n.label)}${n.unitPrice ? ` (${money(n.unitPrice)} each)` : ''}</div>`).join('')}
+    <div class="meta">Save ~${money(r.saved)} · gas ~${money(r.gas)} · <b style="color:${r.net >= 0 ? 'var(--acc)' : 'var(--bad)'}">net ${money(r.net)}</b></div>
+    ${r.cart.length ? `<table>${r.cart.map(x => `<tr><td>${esc(x.name)}</td><td style="text-align:right">${money(x.price)}</td></tr>`).join('')}</table>` : ''}
+    <div class="acts">${links(r.d)}</div></div>`).join('') : '<div class="card">No usable deals for this budget and category nearby today. Try a bigger radius or another category.</div>';
+}
+function renderWallet() {
+  $('#wallet').innerHTML = wallet.map((w, i) => `<div class="card"><b>${esc(w.store)}</b> <span class="meta">updated ${ago(w.updated)}</span>
+    <div class="meta">${w.points != null ? `${w.points.toLocaleString()} pts ≈ ${money(w.points * w.ppv)}` : ''}${w.dollars ? ` · ${money(w.dollars)} rewards` : ''}</div>
+    ${w.offers.map(o => `<div class="dtext">🎁 ${esc(o)}</div>`).join('')}
+    <div class="acts"><button data-wdel="${i}">Remove</button></div></div>`).join('') || '<div class="meta">No rewards saved yet.</div>';
+}
+function renderManual() {
+  $('#manual').innerHTML = manual.map((m, i) => `<div class="card"><b>${esc(m.disp)}</b><div class="dtext">${esc(m.text)}</div><div class="meta">${esc(parseDeal(m.text).label)} · added ${ago(m.added)}</div><div class="acts"><button data-mdel="${i}">Remove</button></div></div>`).join('');
+}
+function renderMap() {
+  if (!window.L) { const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; s.onload = renderMap; document.head.appendChild(s); return; }
+  if (!map) { map = L.map('map'); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map); layer = L.layerGroup().addTo(map); }
+  layer.clearLayers();
+  if (S.center) { L.circle([S.center.lat, S.center.lon], { radius: S.radius * 1609.34, color: '#5ee08a', weight: 1, fillOpacity: 0.04 }).addTo(layer); map.setView([S.center.lat, S.center.lon], S.radius > 60 ? 8 : S.radius > 25 ? 9 : 11); }
+  for (const d of DISPS) {
+    const best = d.parsed.filter(p => !p.expired && appliesToday(p) && matchesCat(p, S.cat)).sort((a, b) => b.score - a.score)[0];
+    L.circleMarker([d.lat, d.lon], { radius: best ? 9 : 5, color: best ? '#ffd54a' : '#5ee08a', fillOpacity: 0.8 }).addTo(layer)
+      .bindPopup(`<b>${esc(d.name)}</b><br>${d.dist.toFixed(1)} mi${best ? `<br><b>${esc(best.label)}</b>: ${esc(best.text)}` : ''}<br><a target="_blank" href="https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lon}">Directions</a>`);
+  }
+  setTimeout(() => map.invalidateSize(), 50);
+}
+function ago(iso) { if (!iso) return ''; const m = (Date.now() - new Date(iso)) / 60000; return m < 60 ? Math.round(m) + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'; }
+function toast(t) { $('#status').textContent = t; }
+
+function banner() {
+  const c = S.center, gh = repo();
+  if (!c) { $('#banner').innerHTML = '<div class="banner">Type a ZIP/city or tap 📍 Me to start.</div>'; return; }
+  const covered = (DATA.regions || []).some(r => hav(c.lat, c.lon, r.lat, r.lon) <= r.radiusMiles);
+  $('#banner').innerHTML = covered ? '' : `<div class="banner">Dispensaries here are live from OpenStreetMap, but this area isn’t in the automatic deal scan yet.
+    ${gh ? `<a target="_blank" href="https://github.com/${gh}/edit/main/regions.json">Add it to regions.json</a> (lat <code>${c.lat.toFixed(4)}</code>, lon <code>${c.lon.toFixed(4)}</code>) and it’ll be scanned on the next run.` : 'Add it to regions.json to scan it.'}</div>`;
+}
+function repo() { return location.hostname.endsWith('github.io') ? `${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}` : ''; }
+
+function render() {
+  save();
+  for (const t of ['deals', 'budget', 'wallet', 'places', 'map', 'add']) $('#t-' + t).classList.toggle('hide', S.tab !== t);
+  $('#tabs').innerHTML = [['deals', '🔥 Deals'], ['budget', '💵 Budget'], ['wallet', '🎁 Wallet'], ['places', '🏪 Places'], ['map', '🗺️ Map'], ['add', '➕ Add deal']].map(([k, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('');
+  $('#cats').innerHTML = ['all', ...CATS].map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-cat="${c}">${CAT_LABEL[c]}</button>`).join('');
+  build(); banner();
+  const n = visibleDeals().length;
+  toast(S.center ? `${DISPS.length} dispensaries within ${S.radius} mi of ${S.center.label} · ${n} matching deals` : '');
+  ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual })[S.tab]();
+}
+
+async function locate(center) {
+  S.center = center; save(); toast('Finding dispensaries…');
+  LIVE = await overpass(center, S.radius);
+  render();
+}
+async function search() {
+  const q = $('#q').value.trim(); if (!q) return;
+  toast('Looking up ' + q + '…');
+  try { S.q = q; const g = await geocode(q); await locate(g); history.replaceState(null, '', `?q=${encodeURIComponent(q)}&r=${S.radius}&c=${S.cat}`); } catch (e) { toast(e.message); }
+}
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-tab],[data-cat],[data-fav],[data-wdel],[data-mdel]'); if (!t) return;
+  if (t.dataset.tab) S.tab = t.dataset.tab;
+  if (t.dataset.cat) S.cat = t.dataset.cat;
+  if (t.dataset.fav) { favs.has(t.dataset.fav) ? favs.delete(t.dataset.fav) : favs.add(t.dataset.fav); ls.set('favs', [...favs]); }
+  if (t.dataset.wdel) { wallet.splice(+t.dataset.wdel, 1); ls.set('wallet', wallet); }
+  if (t.dataset.mdel) { manual.splice(+t.dataset.mdel, 1); ls.set('manual', manual); }
+  render();
+});
+$('#go').onclick = search; $('#q').onkeydown = e => e.key === 'Enter' && search();
+$('#geo').onclick = () => {
+  if (!navigator.geolocation) return toast('Location not available in this browser');
+  toast('Getting your location…');
+  navigator.geolocation.getCurrentPosition(async p => { const { latitude: lat, longitude: lon } = p.coords; S.q = ''; $('#q').value = ''; history.replaceState(null, '', location.pathname); await locate({ lat, lon, label: await reverse(lat, lon) }); },
+    () => toast('Location blocked — type a ZIP instead'), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+};
+let rt; $('#radius').oninput = e => { S.radius = +e.target.value; $('#rv').textContent = S.radius; clearTimeout(rt); rt = setTimeout(() => S.center && locate(S.center), 600); };
+$('#sort').onchange = e => { S.sort = e.target.value; render(); };
+for (const id of ['today', 'hidenew', 'favonly']) $('#' + id).onchange = e => { S[id] = e.target.checked; render(); };
+for (const id of ['budget', 'tax', 'gas']) $('#' + id).oninput = e => { S[id] = e.target.value; render(); };
+
+$('#atext').oninput = () => { const p = parseDeal($('#atext').value); $('#apreview').textContent = $('#atext').value ? `Reads as: ${p.label} · ${p.cats.map(c => CAT_LABEL[c]).join(', ')}${p.days ? ' · ' + p.days.map(dayName).join('/') : ''}` : ''; };
+$('#aadd').onclick = () => {
+  const disp = $('#adisp').value.trim(), text = $('#atext').value.trim(); if (!disp || !text) return toast('Enter a dispensary and the deal');
+  const d = DISPS.find(x => norm(x.name) === norm(disp));
+  manual.unshift({ id: Date.now(), disp, text, lat: d?.lat ?? S.center?.lat, lon: d?.lon ?? S.center?.lon, added: new Date().toISOString() });
+  ls.set('manual', manual); $('#atext').value = ''; $('#apreview').textContent = ''; render();
+};
+$('#aexp').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify({ manual, wallet, favs: [...favs] }, null, 2)], { type: 'application/json' })); a.download = 'buddeals-backup.json'; a.click(); };
+$('#aimp').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.json'; i.onchange = async () => { try { const j = JSON.parse(await i.files[0].text()); manual = j.manual || manual; wallet = j.wallet || wallet; favs = new Set(j.favs || [...favs]); ls.set('manual', manual); ls.set('wallet', wallet); ls.set('favs', [...favs]); render(); toast('Imported'); } catch { toast('That file didn’t work'); } }; i.click(); };
+
+$('#wadd').onclick = () => {
+  let raw = $('#wpaste').value, store = $('#wstore').value.trim();
+  try { const j = JSON.parse(raw); raw = j.lines.join('\n'); store = store || j.site; } catch {}
+  if (!store) return toast('Enter the store or chain name');
+  const r = parseRewards(raw), old = wallet.findIndex(w => norm(w.store) === norm(store));
+  const entry = { store, points: r.points, dollars: r.dollars, ppv: +$('#wppv').value || 0, offers: r.offers.length ? r.offers : raw.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 12), updated: new Date().toISOString() };
+  if (!r.points && !r.dollars && !entry.offers.length) return toast('Didn’t find points or offers in that text');
+  old >= 0 ? (wallet[old] = entry) : wallet.unshift(entry);
+  ls.set('wallet', wallet); $('#wpaste').value = ''; render();
+};
+// Bookmarklet: runs on the rewards page in YOUR browser, keeps only reward-ish lines, strips emails/phones, copies to clipboard. Sends nothing anywhere.
+const BM = `(()=>{const L=document.body.innerText.split(/\\n+/).map(s=>s.trim()).filter(s=>s.length>2&&s.length<200&&/(point|pts|reward|\\$|%|off|birthday|coupon|offer|free|credit|voucher)/i.test(s)&&!/@|\\d{3}[-. )]+\\d{3}[-. ]\\d{4}/.test(s)).slice(0,60);const t=JSON.stringify({site:location.hostname.replace(/^www\\./,'').split('.')[0],lines:L});const done=()=>alert('BudDeals: copied '+L.length+' reward lines. Paste them into your Wallet tab.');navigator.clipboard?navigator.clipboard.writeText(t).then(done,()=>prompt('Copy this, then paste into BudDeals Wallet:',t)):prompt('Copy this:',t)})()`;
+$('#bm').href = 'javascript:' + encodeURIComponent(BM);
+$('#bm').onclick = e => { e.preventDefault(); toast('Drag that button to your bookmarks bar — it only works on a rewards page.'); };
+$('#copybm').onclick = async e => { e.preventDefault(); try { await navigator.clipboard.writeText('javascript:' + encodeURIComponent(BM)); toast('Bookmark code copied'); } catch {} };
+
+// ---------- start ----------
+const gh = repo();
+if (gh) $('#ghlinks').innerHTML = ` · <a target="_blank" href="https://github.com/${gh}/actions/workflows/scan.yml">Scan for new deals now</a>`;
+$('#q').value = S.q || ''; $('#radius').value = S.radius; $('#rv').textContent = S.radius; $('#sort').value = S.sort;
+$('#today').checked = S.today; $('#hidenew').checked = S.hidenew; $('#favonly').checked = S.favonly;
+$('#budget').value = S.budget; $('#tax').value = S.tax; $('#gas').value = S.gas;
+try { DATA = await (await fetch('data/deals.json?' + Date.now())).json(); } catch {}
+$('#updated').textContent = DATA.updated ? `deals scanned ${ago(DATA.updated)}` : 'deals not scanned yet';
+render();
+if (S.q && !S.center) search(); else if (S.center) locate(S.center);
+</script>
+</body>
+</html>
