@@ -248,7 +248,7 @@ function renderPlaces() {
     return `<div class="card">${star(d)}<b>${esc(d.name)}</b><div class="meta">${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}</div>
       ${d.hours ? `<div class="meta">🕒 ${esc(d.hours)}</div>` : ''}
       <div class="meta">${today ? `<span class="tag today">${today} deal${today > 1 ? 's' : ''} today</span>` : d.website ? 'No deals read from their site — check the menu' : 'No website listed'}
-      ${d.wallet.length ? '<span class="tag you">in your wallet</span>' : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
+      ${d.wallet.length ? '<span class="tag you">in your wallet</span>' : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}${d.from ? ` · prices from ${esc(d.from)}` : ''}</div>
       ${bestDays(d)}
       ${prods.length ? `<table>${prods.map(x => `<tr><td>${esc(x.name)}</td><td style="text-align:right">${money(x.price)}</td></tr>`).join('')}</table>` : ''}
       <div class="acts">${links(d)}</div></div>`;

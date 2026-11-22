@@ -352,82 +352,302 @@ def _history(cache, host, products):
         p["inflated"] = bool(p.get("was") and len(h) >= 5 and p["was"] > max(vals) * 1.15 and p["price"] >= p["typical"])
 
 
+# ---------------------------------------------------------------------------------------------------------
+# v2: stores come from Leafly's public dispensary listing (complete, with exact locations); menus come from
+# each chain's own site via a per-chain recipe, or from the store's Leafly menu when there's no recipe.
+# ---------------------------------------------------------------------------------------------------------
+import math
+import unicodedata
+
+
+def slug(s):
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+
+
+def miles_between(a, b, c, d):
+    r = math.radians
+    h = math.sin(r(c - a) / 2) ** 2 + math.cos(r(a)) * math.cos(r(c)) * math.sin(r(d - b) / 2) ** 2
+    return 2 * 3958.8 * math.asin(math.sqrt(h))
+
+
+def _next_data(html_text):
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.S)
+    return json.loads(m.group(1)) if m else None
+
+
+def next_data(url, reader=None):
+    """A Next.js page's built-in data. Plain download first (fast); a real browser if the site blocks that."""
+    try:
+        _, _, raw = _get(url, timeout=20)
+        j = _next_data(raw.decode("utf-8", "replace"))
+        if j:
+            return j
+    except Exception:
+        pass
+    if reader is not None and hasattr(reader, "next_data"):
+        try:
+            return reader.next_data(url)
+        except Exception:
+            return None
+    return None
+
+
+def _open_text(s):
+    o = s.get("openStatus") or {}
+    ch = o.get("statusChangeAt") or {}
+    if o.get("isOpen24Hours"):
+        return "Open 24 hours"
+    t = ch.get("time") or ""
+    try:
+        h, m = (int(x) for x in t.split(":"))
+        t = f"{(h % 12) or 12}{':%02d' % m if m else ''}{'am' if h < 12 else 'pm'}"
+    except Exception:
+        pass
+    if o.get("isOpen") is True:
+        return f"Open until {t}" if t else "Open now"
+    if o.get("isOpen") is False:
+        return f"Closed · opens {t}" if t else "Closed now"
+    return ""
+
+
+def leafly_stores(lat, lon, miles, area, reader=None):
+    state, city = area.get("state"), area.get("city")
+    if not state or not city:
+        return []
+    out = {}
+    for page in range(1, 8):
+        url = f"https://www.leafly.com/dispensaries/{slug(state)}/{slug(city)}" + (f"?page={page}" if page > 1 else "")
+        j = next_data(url, reader)
+        data = ((((j or {}).get("props") or {}).get("pageProps") or {}).get("storeLocatorResults") or {}).get("data") or {}
+        stores = [x for v in data.values() if isinstance(v, list) for x in v if isinstance(x, dict) and x.get("slug")]
+        if not stores:
+            break
+        far = 0
+        for x in stores:
+            a = x.get("address") or {}
+            if a.get("lat") is None:
+                continue
+            if miles_between(lat, lon, a["lat"], a["lon"]) > miles:
+                far += 1
+                continue
+            out[x["slug"]] = {
+                "id": "leafly/" + x["slug"], "name": x.get("name") or "Dispensary", "lat": a["lat"], "lon": a["lon"],
+                "address": " ".join(v for v in [a.get("address1"), a.get("city"), a.get("state")] if v), "city": a.get("city") or "",
+                "phone": x.get("phone") or "", "hours": _open_text(x), "leafly": x["slug"], "hasMenu": bool(x.get("hasMenuItems")),
+                "website": "", "tag": x.get("mainTag") or "",
+            }
+        if far >= len(stores) * 0.8:
+            break
+    return list(out.values())
+
+
+LEAFLY_CATS = {"flower": "flower", "pre-roll": "preroll", "preroll": "preroll", "cartridge": "vape", "vape": "vape", "vaporizer": "vape",
+               "concentrate": "concentrate", "edible": "edible", "tincture": "tincture", "oral": "tincture", "topical": "topical",
+               "accessor": "accessory", "gear": "accessory"}
+
+
+def _leafly_item(x, src):
+    v = (x.get("variants") or [None])[0] or {}
+    price = x.get("price") or v.get("price")
+    deal = x.get("deal") or v.get("deal") or {}
+    now = deal.get("discountedPrice") if isinstance(deal, dict) else None
+    cat = (x.get("productCategory") or "").lower()
+    cats = [c for k, c in LEAFLY_CATS.items() if k in cat][:1] or cats_of(x.get("name") or "")
+    thc = None
+    m = re.search(r"([\d.]+)\s*%", str(x.get("thcContentLabel") or ""))
+    if m:
+        thc = float(m.group(1))
+    p = _product({"name": x.get("name"), "price": now or price, "was": price if now and now < (price or 0) else None,
+                  "brand": x.get("brandName") or "", "strain": "", "thc": thc,
+                  "size": x.get("normalizedQuantityLabel") or x.get("displayQuantity") or ""}, src)
+    if p:
+        p["cats"] = cats
+    return p
+
+
+def leafly_menu(store_slug, reader=None, pages=3):
+    deals, products = [], []
+    for page in range(1, pages + 1):
+        url = f"https://www.leafly.com/dispensary-info/{store_slug}/menu" + (f"?page={page}" if page > 1 else "")
+        j = next_data(url, reader)
+        pp = (((j or {}).get("props") or {}).get("pageProps") or {})
+        md = pp.get("menuData") or {}
+        items = md.get("menuItems") or []
+        if page == 1:
+            for d in pp.get("deals") or []:
+                t = " — ".join(v for v in [d.get("title"), (d.get("description") or "")[:160]] if v)
+                if t:
+                    deals.append({"text": t, "src": f"https://www.leafly.com/dispensary-info/{store_slug}/deals"})
+        products += [p for p in (_leafly_item(x, url) for x in items) if p]
+        if not items or len(products) >= (md.get("totalItems") or 0):
+            break
+    return bool(j), {"t": time.time(), "deals": deals, "products": products}
+
+
+# Per-chain recipes: where each chain's menu for a store lives. `pages(store)` gives start pages; `follow` is a
+# regex for menu links worth following from them; `more` = how many "Load more" clicks per page.
+RECIPES = [
+    {"key": "muv", "rx": r"\bm[uü]v\b", "site": "https://muvfl.com",
+     "pages": lambda st: [f"https://muvfl.com/locations/{slug(st['city'])}/menu/menu/discounts?promo=products",
+                          f"https://muvfl.com/locations/{slug(st['city'])}/menu/menu"],
+     "follow": lambda st: rf"/locations/{slug(st['city'])}/menu/menu/(flower|pre-rolls|vapes|edibles|concentrates)-\d+$", "more": 3},
+    {"key": "trulieve", "rx": r"trulieve", "site": "https://www.trulieve.com",
+     "pages": lambda st: [f"https://www.trulieve.com/category/{c}" for c in ("flower", "vapes", "concentrates", "edibles")],
+     "follow": None, "more": 3},
+    {"key": "sunnyside", "rx": r"sunnyside", "site": "https://www.sunnyside.shop", "pages": lambda st: ["https://www.sunnyside.shop"], "generic": True, "more": 3},
+    {"key": "greendragon", "rx": r"green dragon", "site": "https://greendragon.com", "pages": lambda st: ["https://greendragon.com"], "generic": True, "more": 3},
+]
+
+
+def recipe_for(name):
+    return next((r for r in RECIPES if re.search(r["rx"], name, re.I)), None)
+
+
+def read_recipe(rc, store, reader, ctx):
+    """Reads a chain's menu pages for one store with the hidden browser."""
+    if reader is None:
+        return False, {"t": time.time(), "deals": [], "products": []}
+    ctx = {**ctx, "city": store.get("city") or ctx.get("city", ""), "more": rc.get("more", 3)}
+    if rc.get("generic"):
+        return read_site(rc["pages"](store)[0], reader, ctx)
+    pages, seen, deals, products, ok = list(rc["pages"](store)), set(), [], [], False
+    follow = rc["follow"](store) if rc.get("follow") else None
+    t_end = time.time() + 60
+    while pages and len(seen) < 10 and time.time() < t_end:
+        url = pages.pop(0)
+        if url in seen:
+            continue
+        seen.add(url)
+        r = reader(url, ctx) or {}
+        if not r.get("url"):
+            continue
+        ok = True
+        deals += [{"text": t, "src": r["url"]} for t in r.get("lines") or []]
+        products += [p for p in (_product(x, r["url"]) for x in r.get("items") or []) if p]
+        if follow:
+            pages += [l for l in (r.get("links") or []) + (r.get("allLinks") or []) if re.search(follow, l) and l not in seen][:10]
+    uniq = list({d["text"].lower(): d for d in deals}.values())[:30]
+    prods = list({(p["name"].lower(), p["price"]): p for p in products}.values())[:800]
+    return ok, {"t": time.time(), "deals": uniq, "products": prods}
+
+
+def _source(store):
+    rc = recipe_for(store["name"])
+    if rc:
+        return rc["key"], rc
+    return ("leafly:" + store["leafly"], None) if store.get("leafly") else (host_of(store.get("website") or ""), None)
+
+
 def _out(disps, cache):
     out = []
     for d in disps:
-        h = host_of(d["website"]) if d["website"] else ""
-        s = cache["sites"].get(h, {}) if h else {}
-        out.append({**{k: v for k, v in d.items() if not k.startswith("_")}, "host": h, "deals": s.get("deals", []),
-                    "products": s.get("products", []), "stale": s.get("stale", False),
+        key, rc = _source(d)
+        s = cache["sites"].get(key, {}) if key else {}
+        site = (rc or {}).get("site") or d.get("website") or (f"https://www.leafly.com/dispensary-info/{d['leafly']}" if d.get("leafly") else "")
+        out.append({**{k: v for k, v in d.items() if not k.startswith("_")}, "website": site, "host": key, "deals": s.get("deals", []),
+                    "products": s.get("products", []), "stale": s.get("stale", False), "from": s.get("from", ""),
                     "checked": datetime.fromtimestamp(s["t"], timezone.utc).isoformat() if s.get("t") else None})
     return out
 
 
-def _area_disps(lat, lon, miles, cache, force):
-    disps, note = dispensaries(lat, lon, miles, cache, force)
-    for d in disps:
-        if not d["website"]:
-            d["website"] = next((u for rx, u in CHAIN_SITES if re.search(rx, d["name"], re.I)), "")
-        d["_dist"] = (d["lat"] - lat) ** 2 + (d["lon"] - lon) ** 2
+def _area_disps(lat, lon, miles, cache, force, reader=None):
+    key = f"L{lat:.2f},{lon:.2f},{int(miles)}"
+    hit = cache["areas"].get(key)
+    if hit and not force and time.time() - hit["t"] < 24 * 3600:
+        return hit["d"], hit.get("area", {}), None
+    area = area_of(lat, lon)
+    disps = leafly_stores(lat, lon, miles, area, reader)
+    note = None
+    if not disps:  # Leafly unreachable or no city match: fall back to the map, cannabis shops only
+        osm, note = dispensaries(lat, lon, miles, cache, False)
+        disps = [d for d in osm if re.search(r"cannabis|dispensar|marijuana|" + "|".join(r["rx"] for r in RECIPES), d["name"], re.I)]
+    if disps:
+        cache["areas"][key] = {"t": time.time(), "d": disps, "area": area}
+    elif hit:
+        return hit["d"], hit.get("area", {}), "Couldn't refresh the store list — showing the last one."
     if not disps and not note:
-        note = "No dispensaries found on the map within this radius. Try a bigger radius."
-    return disps, note
+        note = "No dispensaries found within this radius. Try a bigger radius."
+    return disps, area, note
 
 
 def cached(lat, lon, miles):
-    """Instant: whatever was read before for this area (only goes online if the area's store list isn't known yet)."""
+    """Instant: whatever was read before for this area (no browsing)."""
     with _lock:
         cache = _load()
-    disps, note = _area_disps(lat, lon, miles, cache, False)
-    with _lock:
-        c2 = _load()
-        c2["areas"].update(cache["areas"])
-        _save(c2)
-    return {"dispensaries": _out(disps, cache), "updated": None, "error": note}
+    key = f"L{lat:.2f},{lon:.2f},{int(miles)}"
+    hit = cache["areas"].get(key)
+    return {"dispensaries": _out(hit["d"], cache) if hit else [], "updated": None, "error": None}
 
 
 def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, on_site=None, only_host=None, workers=8):
     with _lock:
         cache = _load()
-    disps, note = _area_disps(lat, lon, miles, cache, False)
-    area = area_of(lat, lon) if reader else {}
-    sites, ctxs = {}, {}
+    disps, area, note = _area_disps(lat, lon, miles, cache, False, reader)
+    for d in disps:
+        d["_dist"] = miles_between(lat, lon, d["lat"], d["lon"])
+    jobs = {}  # source key -> (recipe, nearest store of that source)
     for d in sorted(disps, key=lambda x: x["_dist"]):
-        h = host_of(d["website"]) if d["website"] else ""
-        if h and h not in sites:
-            sites[h] = d["website"]
-            ctxs[h] = {**area, "city": d.get("city") or area.get("city", ""), "agree": agree}
+        k, rc = _source(d)
+        if k and k not in jobs:
+            jobs[k] = (rc, d)
     if only_host:
-        todo = [(h, w) for h, w in sites.items() if h == only_host]
+        todo = [k for k in jobs if k == only_host]
     else:
-        todo = [(h, w) for h, w in sites.items() if force or time.time() - cache["sites"].get(h, {}).get("t", 0) > SITE_TTL]
+        todo = [k for k in jobs if force or time.time() - cache["sites"].get(k, {}).get("t", 0) > SITE_TTL]
+    ctx = {**area, "agree": agree}
+
+    def work(k):
+        rc, st = jobs[k]
+        if rc:
+            ok, data = read_recipe(rc, st, reader, ctx)
+            data["from"] = f"{re.sub(r'\s*[-–].*$', '', st['name'])} website ({st.get('city', '')} store)"
+            if not data["products"] and st.get("leafly") and st.get("hasMenu"):
+                ok2, d2 = leafly_menu(st["leafly"], reader)
+                if d2["products"]:
+                    d2["deals"] = data["deals"] + d2["deals"]
+                    d2["from"] = "Leafly menu"
+                    return ok2, d2
+            return ok, data
+        if k.startswith("leafly:"):
+            if not st.get("hasMenu"):
+                return True, {"t": time.time(), "deals": [], "products": [], "from": "no online menu"}
+            ok, data = leafly_menu(st["leafly"], reader)
+            data["from"] = "Leafly menu"
+            return ok, data
+        ok, data = read_site(st.get("website"), reader, ctx)
+        data["from"] = "store website"
+        return ok, data
+
     done = 0
+    if on_site and disps:
+        on_site(_out(disps, cache))  # stores show up right away; menus fill in as each one is read
     if progress:
         progress(0, len(todo))
-    with cf.ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo) or 1)) if reader else 8) as pool:
-        futs = {pool.submit(read_site, w, reader, ctxs.get(h), cache["sites"].get(h, {}).get("pages")): h for h, w in todo}
+    with cf.ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo) or 1))) as pool:
+        futs = {pool.submit(work, k): k for k in todo}
         for f in cf.as_completed(futs):
-            h = futs[f]
+            k = futs[f]
             try:
                 ok, data = f.result()
             except Exception:
                 ok, data = False, {"t": time.time(), "deals": [], "products": []}
             with _lock:
-                old = cache["sites"].get(h, {})
+                old = cache["sites"].get(k, {})
                 if ok or not (old.get("deals") or old.get("products")):
-                    _history(cache, h, data["products"])
-                    cache["sites"][h] = data
+                    _history(cache, k, data["products"])
+                    cache["sites"][k] = data
                 else:
                     old["stale"] = True
             done += 1
             if on_site:
-                on_site(_out([d for d in disps if host_of(d["website"] or "") == h], cache))
+                on_site(_out([d for d in disps if _source(d)[0] == k], cache))
             if progress:
                 progress(done, len(todo))
     with _lock:
-        c2 = _load()  # merge in case another scan saved meanwhile
+        c2 = _load()
         c2["areas"].update(cache["areas"])
-        c2["sites"].update({h: cache["sites"][h] for h, _ in todo if h in cache["sites"]})
+        c2["sites"].update({k: cache["sites"][k] for k in todo if k in cache["sites"]})
         c2.setdefault("hist", {}).update(cache.get("hist", {}))
         _save(c2)
-    return {"dispensaries": _out(disps, cache), "updated": datetime.now(timezone.utc).isoformat(), "error": note, "sitesRead": len(sites)}
+    return {"dispensaries": _out(disps, cache), "updated": datetime.now(timezone.utc).isoformat(), "error": note, "sitesRead": len(jobs)}

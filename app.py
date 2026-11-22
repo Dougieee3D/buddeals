@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "2.0.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -70,10 +70,28 @@ for(const leaf of [...document.querySelectorAll('body *')].filter(isPrice).slice
  const price=now.length?Math.min(...now):Math.min(...vals.map(x=>x.v));const wasP=was.length?Math.max(...was):null;
  const name=t.split(/\n+/).map(x=>T(x.replace(/\$\s?\d[\d,.]*/g,' '))).filter(s=>s.length>3&&s.length<140&&!/\$|add to (cart|bag)|^\d+\s*%|^(sale|new|qty|quantity|in stock|sold out)/i.test(s)).sort((a,b)=>b.length-a.length)[0]||'';
  if(!name)continue;items.push({name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:(t.split(/\n+/).map(T).find(x=>x.length>1&&x.length<30&&x!==name&&!/\$|%|thc|terp|^\d|indica|sativa|hybrid|sale|new|\|/i.test(x))||'')});if(items.length>=400)break}
+
+const META=/^(sale|new|indica|sativa|hybrid|cbd|thc|terp|only \d+ left|view options|add to (cart|bag)|currently|formerly|was|now|regular|as low as:?|each|limited|in stock|sold out|staff pick|best seller|popular|featured|\d+(\.\d+)?\s?(g|mg|oz|ml)|\d+\s*%\s*off|\$[\d.,]+\s*off|save .*|\|)$/i;
+let grid=null,gn=0;for(const el of document.querySelectorAll('body *')){const k=el.children;if(k.length<4||k.length>600)continue;let n=0;for(const c of k){const t=c.innerText||'';if(t.length>12&&t.length<900&&/\$\s?\d/.test(t))n++}if(n>=4&&n/k.length>=0.5&&n>gn){grid=el;gn=n}}
+const items2=[];
+if(grid)for(const c of grid.children){const L=(c.innerText||'').split(/\n+/).map(T).filter(Boolean);if(L.length<2||!/\$\s?\d/.test(L.join(' ')))continue;
+ let now=null,was=null,low=null,label='';const money=x=>parseFloat(x.replace(/[$,\s]/g,''));
+ for(const l of L){const lab=l.match(/^(currently|now|sale price|formerly|was|regular price|reg\.?|original|as low as:?)\s*(\$\s?[\d.,]+)?$/i);
+  if(lab){label=lab[1].toLowerCase();if(lab[2]){const v=money(lab[2]);if(/as low/.test(label))low=v;else if(/formerly|was|reg|original/.test(label))was=v;else now=v;label=''}continue}
+  if(/^(\$\s?[\d.,]+\s*)+$/.test(l)){const vs=[...l.matchAll(/\$\s?([\d.,]+)/g)].map(m=>money(m[1]));for(const v of vs){if(/formerly|was|reg|original/.test(label))was=v;else if(/as low/.test(label))low=v;else if(now==null)now=v;else if(was==null&&v>now)was=v}label='';continue}
+  const al=l.match(/as low as:?\s*\$\s?([\d.,]+)/i);if(al)low=money(al[0].replace(/as low as:?/i,''))}
+ for(const e of c.querySelectorAll('*')){if(e.children.length||!/^\$\s?[\d.,]+$/.test(T(e.textContent)))continue;if(/^(S|DEL|STRIKE)$/.test(e.tagName)||getComputedStyle(e).textDecorationLine.includes('line-through')||(e.parentElement&&getComputedStyle(e.parentElement).textDecorationLine.includes('line-through'))){const v=parseFloat(T(e.textContent).replace(/[^\d.]/g,''));if(v>0){was=v;if(now===v)now=null}}}
+ const allP=[...(c.innerText||'').matchAll(/\$\s?([\d.,]+)(?!\s*off)/gi)].map(m=>money(m[1])).filter(v=>v>0&&v!==was);if(now==null&&allP.length)now=Math.min(...allP);
+ const price=now??low;if(!(price>0))continue;
+ const brandLine=L.find(l=>/\bby\s+\S/i.test(l)&&l.length<60);const brand=brandLine?brandLine.replace(/^.*?\bby\s+/i,''):'';
+ const cand=L.filter(l=>l.length>2&&l.length<100&&l!==brandLine&&!META.test(l)&&!/\$|%|:\s|^\d/.test(l));
+ const name=cand.sort((a,b)=>b.length-a.length)[0]||'';if(!name)continue;
+ const t=L.join('\n');items2.push({name,price,was:was&&was>price?was:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/THC:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:brand||(cand.length>1?cand.filter(x=>x!==name).sort((a,b)=>a.length-b.length)[0]:'')})}
+const useItems=items2.length>=items.length?items2:items;
 const host=location.hostname;const links=[...document.querySelectorAll('a[href]')].map(a=>({h:a.href.split('#')[0],t:T(a.innerText).toLowerCase()})).filter(x=>{try{return new URL(x.h).hostname===host&&x.h!==location.href}catch(e){return false}});
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
 const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
-return JSON.stringify({url:location.href,lines,items,links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
+return JSON.stringify({url:location.href,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
 
 
 class BrowserReader:
@@ -112,7 +130,7 @@ class BrowserReader:
                 w.load_url(url)  # the store picker may have sent us elsewhere; come back to the page we wanted
                 ev.wait(25)
                 self._settle(w)
-            for _ in range(8):
+            for _ in range(int(ctx.get("more", 6))):
                 if not w.evaluate_js(LOAD_MORE_JS):
                     time.sleep(0.8)
                     if not w.evaluate_js(LOAD_MORE_JS):
@@ -121,6 +139,19 @@ class BrowserReader:
             return json.loads(w.evaluate_js(EXTRACT_JS) or "{}")
         except Exception:
             return {}
+        finally:
+            self.pool.put((w, ev))
+
+    def next_data(self, url):
+        w, ev = self.pool.get()
+        try:
+            ev.clear()
+            w.load_url(url)
+            ev.wait(25)
+            txt = w.evaluate_js("(document.getElementById('__NEXT_DATA__')||{}).textContent||''")
+            return json.loads(txt) if txt else None
+        except Exception:
+            return None
         finally:
             self.pool.put((w, ev))
 
