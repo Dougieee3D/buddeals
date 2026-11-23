@@ -352,7 +352,7 @@ function prodRow(d, p, i) {
 function renderDeals() {
   const list = visibleDeals(), budget = +S.budget || 0;
   ENTRIES = list;
-  if (!list.length) {
+  if (!list.length && (S.view === 'list' || !DISPS.length)) {
     $('#deals').innerHTML = `<div class="card empty">${!S.center ? 'Type your ZIP code at the top and press <b>Search</b>, or press <b>📍 Find me</b>.' : scanning ? 'Checking each store’s menu now — prices appear here as each store finishes.' : `No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found within ${S.radius} miles${QS ? ` for “${esc(QS)}”` : ''}. Try a bigger distance or press <b>🔄 Refresh prices</b>.`}</div>`;
   } else if (S.view === 'list') {
     $('#deals').innerHTML = `<div class="store">${list.filter(x => !S.focus || storeKey(x.d) === S.focus).slice(0, 300).map(({ d, p }, i) => p.item ? prodRow(d, p, i).replace('<div class="pname">', `<div class="psub"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi</div><div class="pname">`)
@@ -366,10 +366,18 @@ function renderDeals() {
       const key = (p.text + '|' + (p.price || '')).toLowerCase(); if (g.seen.has(key)) return; g.seen.add(key);
       (p.item ? g.items : g.specials).push({ p, i });
     });
+    // every store from the search shows, even ones with nothing matching right now
+    for (const d of DISPS.slice().sort((a, b) => a.dist - b.dist)) {
+      if (S.favonly && !favs.has(d.id)) continue;
+      const k = storeKey(d), g = groups.get(k);
+      if (!g) groups.set(k, { d, items: [], specials: [], seen: new Set(), others: new Map() });
+      else if (d.id !== g.d.id && !g.others.has(d.id)) { if (d.dist < g.d.dist) { g.others.set(g.d.id, g.d); g.d = d; } else g.others.set(d.id, d); }
+    }
     let gs = [...groups.values()];
     if (S.focus) gs = gs.filter(g => storeKey(g.d) === S.focus);
+    const rank = g => { const i = list.findIndex(x => storeKey(x.d) === storeKey(g.d)); return i < 0 ? 1e9 : i; };
     if (S.sort === 'dist') gs.sort((a, b) => a.d.dist - b.d.dist);
-    else gs.sort((a, b) => (b.items.length ? 1 : 0) - (a.items.length ? 1 : 0) || list.findIndex(x => storeKey(x.d) === storeKey(a.d)) - list.findIndex(x => storeKey(x.d) === storeKey(b.d)));
+    else gs.sort((a, b) => (b.items.length || b.specials.length ? 1 : 0) - (a.items.length || a.specials.length ? 1 : 0) || rank(a) - rank(b) || a.d.dist - b.d.dist);
     $('#deals').innerHTML = (S.focus ? `<div class="acts" style="margin:0 0 12px"><button class="pri" data-unfocus="1">← Back to all stores</button></div>` : '') + `<div class="stores${S.focus ? ' focus' : ''}">${gs.map(g => {
       const d = g.d, k = storeKey(d), open = /^open/i.test(d.hours || ''), n = S.focus || S.expanded[k] ? 9999 : 8;
       const others = [...g.others.values()].sort((a, b) => a.dist - b.dist).slice(0, 3);
@@ -380,13 +388,13 @@ function renderDeals() {
         <div class="meta">${g.items.length} item${g.items.length === 1 ? '' : 's'} shown${inCart ? ` · <b style="color:var(--acc)">${money(inCart)} in your cart</b>` : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
         <div class="acts" style="margin-top:8px">${links(d)}</div></div>
         ${g.specials.length ? `<div class="specials">${g.specials.slice(0, 4).map(({ p }) => `<div>🏷️ <b>${esc(p.text)}</b></div>`).join('')}</div>` : ''}
-        <div class="plist">${g.items.slice(0, n).map(({ p, i }) => prodRow(d, p, i)).join('')}</div>${g.items.length ? '' : '<div class="empty">No product prices online for this store — call them or check their menu.</div>'}
+        <div class="plist">${g.items.slice(0, n).map(({ p, i }) => prodRow(d, p, i)).join('')}</div>${g.items.length ? '' : (scanning && !d.checked) ? '<div class="empty">Checking this store’s menu…</div>' : (d.products || []).length ? `<div class="empty">Nothing here matches your ${S.cat !== 'all' ? CAT_LABEL[S.cat].toLowerCase() + ' ' : ''}${fCount() || QS ? 'filters/search' : 'choice'} right now. <a href="#" data-focus="${esc(k)}" data-focusall="1">See their full menu ›</a></div>` : '<div class="empty">No product prices online for this store — call them or check their menu.</div>'}
         ${!S.focus && g.items.length > 8 ? `<button class="more" data-focus="${esc(k)}">Show all ${g.items.length} items from this store ›</button>` : ''}</div>`;
     }).join('')}</div>`;
   }
   $('#deals').onclick = e => {
     const b = e.target.closest('[data-add],[data-used],[data-reread],[data-watch],[data-compare],[data-expand],[data-share],[data-focus],[data-unfocus]'); if (!b) return;
-    if (b.dataset.focus) { e.preventDefault(); S.focus = b.dataset.focus; render(); window.scrollTo(0, 0); return; }
+    if (b.dataset.focus) { e.preventDefault(); if (b.dataset.focusall) { S.cat = 'all'; S.f = {}; QS = ''; $('#qs').value = ''; } S.focus = b.dataset.focus; render(); window.scrollTo(0, 0); return; }
     if (b.dataset.unfocus) { S.focus = ''; render(); return; }
     if (b.dataset.expand) { S.expanded = { ...S.expanded, [b.dataset.expand]: !S.expanded[b.dataset.expand] }; return render(); }
     const ent = list[+(b.dataset.add ?? b.dataset.used ?? b.dataset.watch ?? b.dataset.compare ?? b.dataset.share)];
