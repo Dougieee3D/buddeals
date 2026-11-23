@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.5.1"
+APP_VERSION = "2.6.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -32,7 +32,7 @@ READ_REWARDS_JS = r"""(()=>{const L=document.body.innerText.split(/\n+/).map(s=>
 GATE_JS = r"""((STATE,ZIP,CITY,AGREE)=>{const T=s=>(s||'').replace(/\s+/g,' ').trim();const body=T(document.body.innerText).toLowerCase();
 const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};const click=e=>{try{e.click();return true}catch(x){return false}};
 const cl=()=>[...document.querySelectorAll('button,a,[role=button],[role=option],input[type=submit]')].filter(vis);let did=[];
-for(const b of cl()){if(/^(reject|reject all|decline|deny|necessary only|only necessary|reject non-essential)$/.test(T(b.innerText).toLowerCase())){click(b);break}}
+{const cb=cl();const dec=cb.find(b=>/^(reject|reject all|decline|deny|necessary only|only necessary|reject non-essential|decline all)$/.test(T(b.innerText).toLowerCase()));if(dec){click(dec)}else if(AGREE&&/cookie/.test(body)){const ok=cb.find(b=>/^(accept|accept all|accept cookies|ok|okay|got it|i understand|allow|allow all|close|dismiss|continue)$/.test(T(b.innerText||b.getAttribute('aria-label')).toLowerCase()));if(ok){click(ok);did.push('cookies')}}}
 if(STATE&&/(select|choose|pick) (your |a )?state|which state/.test(body)){const st=STATE.toLowerCase();
  const sel=[...document.querySelectorAll('select')].find(x=>[...x.options].some(o=>T(o.text).toLowerCase()===st));
  if(sel){const o=[...sel.options].find(o=>T(o.text).toLowerCase()===st);if(sel.value!==o.value){sel.value=o.value;sel.dispatchEvent(new Event('change',{bubbles:true}));did.push('state')}}
@@ -94,7 +94,8 @@ const useItems=items2.length>=items.length?items2:items;
 const host=location.hostname;const links=[...document.querySelectorAll('a[href]')].map(a=>({h:a.href.split('#')[0],t:T(a.innerText).toLowerCase()})).filter(x=>{try{return new URL(x.h).hostname===host&&x.h!==location.href}catch(e){return false}});
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
 const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
-return JSON.stringify({url:location.href,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
+const embeds=[...document.querySelectorAll('iframe[src]')].map(f=>f.src).filter(u=>/dutchie|iheartjane|\bjane\b|sweed|weedmaps|tymber|blaze|meadow|dispenseapp|treez|flowhub|joint|alpine|grassdoor|leafbuyer|olla/i.test(u)&&!/leafly/i.test(u)).slice(0,3);
+return JSON.stringify({url:location.href,embeds,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
 
 
 class BrowserReader:
