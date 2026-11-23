@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.7.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -39,7 +39,7 @@ if(STATE&&/(select|choose|pick) (your |a )?state|which state/.test(body)){const 
  else{const opt=[...document.querySelectorAll('[role=option],li,button,a,span,div,p')].filter(vis).find(e=>e.children.length<3&&T(e.innerText).toLowerCase()===st);
   if(opt){click(opt);did.push('state')}else{const cb=[...document.querySelectorAll('[role=combobox],[aria-haspopup],select')].filter(vis)[0];if(cb){click(cb);did.push('open-state')}}}}
 if(AGREE){for(const c of [...document.querySelectorAll('input[type=checkbox]')].filter(x=>!x.checked)){const l=T((c.labels&&c.labels[0]&&c.labels[0].innerText)||((c.closest('label')||c.parentElement||{}).innerText)||'').toLowerCase();if(/(18|21|age|agree|terms|patient)/.test(l)){click(c);did.push('check')}}}
-if(AGREE&&/(21|18|age verification|verify your age|patient|over the age|of legal age|are you (over|at least|a))/.test(body)){for(const b of cl()){const t=T(b.innerText||b.value).toLowerCase();if(t.length<45&&/^(yes|enter|i am 21|i'm 21|i am 18|i'm 18|i am over|i'm over|i am a (medical )?patient|i'm a (medical )?patient|i agree|agree|confirm|yes,? i)/.test(t)){click(b);did.push('age');break}}}
+if(AGREE&&/(21|18|age verification|verify your age|patient|over the age|of legal age|are you (over|at least|a)|adult[- ]use|recreational|medical)/.test(body)){const MED=/florida/i.test(STATE);const choose=cl().find(b=>{const t=T(b.innerText||b.value).toLowerCase();return t.length<40&&(MED?/^(medical|med|shop medical|medical menu|i'?m a (medical )?patient|i am a (medical )?patient|patient)$/:/^(adult[- ]use|recreational|rec|shop (adult[- ]use|recreational)|adult[- ]use menu|recreational menu|21\+|adult use 21\+)$/).test(t)});if(choose){click(choose);did.push('menu-type')}else{for(const b of cl()){const t=T(b.innerText||b.value).toLowerCase();if(t.length<45&&/^(yes|enter|enter site|i am 21|i'm 21|i am 18|i'm 18|i am over|i'm over|i am of (legal )?age|i'm of (legal )?age|i am a (medical )?patient|i'm a (medical )?patient|i have a medical card|i agree|agree|confirm|continue|yes,? i|verify|i'?m 21\+|21\+|over 21)/.test(t)){click(b);did.push('age');break}}}}
 if(/(select|choose|find|pick) (a |your )?(location|store|dispensary)|shop here|select (a )?store|set (as )?(my )?store/.test(body)){
  const re=/^(shop here|select store|select this store|select|choose|choose store|choose this store|set (as )?(my )?store|shop this (store|location)|start shopping|shop now|order here|make this my store)$/;
  const btns=cl().filter(b=>re.test(T(b.innerText).toLowerCase()));let pick=null;
@@ -95,7 +95,8 @@ const host=location.hostname;const links=[...document.querySelectorAll('a[href]'
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
 const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
 const embeds=[...document.querySelectorAll('iframe[src]')].map(f=>f.src).filter(u=>/dutchie|iheartjane|\bjane\b|sweed|weedmaps|tymber|blaze|meadow|dispenseapp|treez|flowhub|joint|alpine|grassdoor|leafbuyer|olla/i.test(u)&&!/leafly/i.test(u)).slice(0,3);
-return JSON.stringify({url:location.href,embeds,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
+const dbg=useItems.length?null:{title:document.title,text:T(document.body.innerText).slice(0,400),frames:[...document.querySelectorAll('iframe')].map(f=>f.src||'(no src)').slice(0,6),scripts:[...document.scripts].map(x=>x.src).filter(u=>/dutchie|jane|sweed|tymber|weedmaps|blaze|meadow|treez|flowhub|joint|alpine|olla|leafly/i.test(u)).slice(0,6),buttons:[...document.querySelectorAll('button,a[role=button]')].map(b=>T(b.innerText)).filter(Boolean).slice(0,15)};
+return JSON.stringify({url:location.href,dbg,embeds,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
 
 
 class BrowserReader:
@@ -242,7 +243,7 @@ class Api:
         except Exception as e:
             return {"dispensaries": [], "updated": None, "error": f"{e}"}
 
-    def scan(self, lat, lon, miles, force=False, agree=False, only_host=None, workers=8):
+    def scan(self, lat, lon, miles, force=False, agree=False, only_host=None, workers=8, leafly=False):
         def progress(done, total):
             try:
                 main.evaluate_js(f"window.onScanProgress && window.onScanProgress({done},{total})")
@@ -260,7 +261,7 @@ class Api:
             reader = None
         try:
             return scan.scan(float(lat), float(lon), float(miles), bool(force), progress, reader, bool(agree), on_site, only_host,
-                             int(workers or 8))
+                             int(workers or 8), bool(leafly))
         except Exception as e:
             return {"dispensaries": [], "updated": None, "error": f"Scan failed: {e}"}
         finally:

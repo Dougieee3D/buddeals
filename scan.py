@@ -301,7 +301,7 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
     known_pages: pages that had products last time — read those directly instead of discovering again."""
     base = website if re.match(r"https?:", website, re.I) else "https://" + website
     start = list(dict.fromkeys(known_pages or [])) or [base]
-    pages, seen, deals, products, ok, useful = start[:], set(), [], [], False, []
+    pages, seen, deals, products, ok, useful, dbg = start[:], set(), [], [], False, [], []
     limit = max(len(start), 9 if reader else 4)
     t_end = time.time() + 75
     i = 0
@@ -321,6 +321,8 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
                         pages.insert(i, e)
                 prods = [p for p in (_product(x, final) for x in r.get("items") or []) if p]
                 ok = ok or bool(r.get("url"))
+                if r.get("dbg") and len(dbg) < 4:
+                    dbg.append({"url": final, **r["dbg"]})
             else:
                 ctype, final, raw = _get(url)
                 if "html" not in ctype.lower():
@@ -337,11 +339,40 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
                 pages += links[:8] if reader else (links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")])
         except Exception:
             pass
+    if reader and not products and not (known_pages and ok):
+        tried = set(seen)
+        for path in ("/menu", "/shop", "/order-online", "/products", "/order", "/menus", "/store"):
+            if time.time() > t_end:
+                break
+            u = urllib.parse.urljoin(base, path)
+            if u in tried:
+                continue
+            try:
+                r = reader(u, ctx) or {}
+            except Exception:
+                r = {}
+            if r.get("dbg"):
+                dbg.append({"url": r.get("url") or u, **r["dbg"]})
+            prods = [p for p in (_product(x, r.get("url") or u) for x in r.get("items") or []) if p]
+            for e in (r.get("embeds") or [])[:2]:
+                rr = reader(e, ctx) or {}
+                prods += [p for p in (_product(x, rr.get("url") or e) for x in rr.get("items") or []) if p]
+                deals += [{"text": t, "src": rr.get("url") or e} for t in rr.get("lines") or []]
+                if rr.get("dbg"):
+                    dbg.append({"url": e, **rr["dbg"]})
+            if prods:
+                products += prods
+                useful.append(u)
+                deals += [{"text": t, "src": r.get("url") or u} for t in r.get("lines") or []]
+                break
     if known_pages and ok and not products and not deals:
         return read_site(website, reader, ctx)  # the site changed; discover its pages again
     uniq = list({d["text"].lower(): d for d in deals}.values())[:30]
     prods = list({(p["name"].lower(), p["price"]): p for p in products}.values())[:600]
-    return ok, {"t": time.time(), "deals": uniq, "products": prods, "pages": useful[:9]}
+    out = {"t": time.time(), "deals": uniq, "products": prods, "pages": useful[:9]}
+    if not prods:
+        out["dbg"] = dbg[:5]  # what the pages looked like, to fix this site
+    return ok, out
 
 
 def _history(cache, host, products):
@@ -634,6 +665,52 @@ def leafly_website(store_slug, cache, reader=None):
     return url
 
 
+SKIP_SITES = r"leafly|weedmaps|yelp|facebook|instagram|twitter|x\.com|tiktok|google|bing|duckduckgo|mapquest|tripadvisor|indeed|glassdoor|linkedin|wikipedia|youtube|reddit|yellowpages|bbb\.org|foursquare|apple\.com|dutchie\.com/dispensary|iheartjane\.com/stores|allbud|cannabis\.net|where2getit|massroots|budbo|kaycha|patch\.com|news|\.gov"
+
+
+def search_website(name, city, state):
+    """Find a store's own website the way a person would: search the web for it and take the first real site."""
+    q = urllib.parse.quote(f"{name} {city} {state} dispensary")
+    found = []
+    try:
+        page = _get(f"https://html.duckduckgo.com/html/?q={q}", timeout=12)[2].decode("utf-8", "replace")
+        for m in re.finditer(r'uddg=([^&"]+)', page):
+            found.append(urllib.parse.unquote(m.group(1)))
+    except Exception:
+        pass
+    if not found:
+        try:
+            page = _get(f"https://www.bing.com/search?q={q}", timeout=12)[2].decode("utf-8", "replace")
+            found = re.findall(r'<li class="b_algo"[^>]*>.*?<a href="(https?://[^"]+)"', page, re.S)
+        except Exception:
+            pass
+    words = [w for w in re.findall(r"[a-z]{3,}", name.lower()) if w not in ("dispensary", "cannabis", "the", "and", "medical", "adult", "use", "rec", "med", "company", "co")]
+    for u in found[:8]:
+        if re.search(SKIP_SITES, u, re.I):
+            continue
+        host = host_of(u)
+        if words and not any(w[:5] in host for w in words) and len(found) > 1:
+            continue  # first result isn't the store's own site
+        return u
+    return ""
+
+
+def find_website(store, area, cache, reader=None):
+    """Store's own site: chain list → its Leafly page → web search. Cached 30 days."""
+    web = cache.setdefault("web", {})
+    key = store.get("leafly") or store["id"]
+    hit = web.get("s:" + key)
+    if hit and time.time() - hit["t"] < 30 * 86400:
+        return hit["url"]
+    url = next((u for rx, u in CHAIN_SITES if re.search(rx, store["name"], re.I)), "")
+    if not url and store.get("leafly"):
+        url = leafly_website(store["leafly"], cache, reader)
+    if not url:
+        url = search_website(re.sub(r"\s*[-–(].*$", "", store["name"]), store.get("city") or area.get("city", ""), area.get("state", ""))
+    web["s:" + key] = {"t": time.time(), "url": url}
+    return url
+
+
 def _source(store):
     rc = recipe_for(store["name"])
     if rc:
@@ -687,17 +764,17 @@ def cached(lat, lon, miles):
     return {"dispensaries": _out(hit["d"], cache) if hit else [], "updated": None, "error": None}
 
 
-def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, on_site=None, only_host=None, workers=8):
+def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, on_site=None, only_host=None, workers=8, use_leafly=False):
     with _lock:
         cache = _load()
     disps, area, note = _area_disps(lat, lon, miles, cache, False, reader)
     for d in disps:
         d["_dist"] = miles_between(lat, lon, d["lat"], d["lon"])
-    need = [d for d in disps if d.get("leafly") and not d.get("website") and not recipe_for(d["name"])]
-    if need:  # find each store's own website so we read the real site, not just Leafly
+    need = [d for d in disps if not d.get("website") and not recipe_for(d["name"])]
+    if need:  # find each store's own website so we read the real site
         with cf.ThreadPoolExecutor(max_workers=8) as pool:
-            for d, url in zip(need, pool.map(lambda d: leafly_website(d["leafly"], cache, None), need)):
-                d["website"] = url or next((u for rx, u in CHAIN_SITES if re.search(rx, d["name"], re.I)), "")
+            for d, url in zip(need, pool.map(lambda d: find_website(d, area, cache, None), need)):
+                d["website"] = url
     jobs = {}  # source key -> (recipe, nearest store of that source)
     for d in sorted(disps, key=lambda x: x["_dist"]):
         k, rc = _source(d)
@@ -706,7 +783,8 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     if only_host:
         todo = [k for k in jobs if k == only_host]
     else:
-        todo = [k for k in jobs if force or time.time() - cache["sites"].get(k, {}).get("t", 0) > SITE_TTL]
+        todo = [k for k in jobs if force or time.time() - cache["sites"].get(k, {}).get("t", 0) > SITE_TTL
+                or (not use_leafly and "Leafly" in cache["sites"].get(k, {}).get("from", ""))]
     ctx = {**area, "agree": agree}
 
     def work(k):
@@ -714,7 +792,7 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
         if rc:
             ok, data = read_recipe(rc, st, reader, ctx)
             data["from"] = f"{re.sub(r'\s*[-–].*$', '', st['name'])} website ({st.get('city', '')} store)"
-            if not data["products"] and st.get("leafly") and st.get("hasMenu"):
+            if use_leafly and not data["products"] and st.get("leafly") and st.get("hasMenu"):
                 ok2, d2 = leafly_menu(st["leafly"], reader)
                 if d2["products"]:
                     d2["deals"] = data["deals"] + d2["deals"]
@@ -722,6 +800,8 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
                     return ok2, d2
             return ok, data
         if k.startswith("leafly:"):
+            if not use_leafly:
+                return True, {"t": time.time(), "deals": [], "products": [], "from": "couldn't find this store's website"}
             if not st.get("hasMenu"):
                 return True, {"t": time.time(), "deals": [], "products": [], "from": "no online menu"}
             ok, data = leafly_menu(st["leafly"], reader)
@@ -729,7 +809,7 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
             return ok, data
         ok, data = read_site(st.get("website"), reader, {**ctx, "city": st.get("city") or ctx.get("city", ""), "more": 4})
         data["from"] = "store website"
-        if not data["products"] and st.get("leafly") and st.get("hasMenu"):
+        if use_leafly and not data["products"] and st.get("leafly") and st.get("hasMenu"):
             ok2, d2 = leafly_menu(st["leafly"], reader)
             if d2["products"]:
                 d2["deals"] = data["deals"] + d2["deals"]

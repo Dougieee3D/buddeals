@@ -388,7 +388,7 @@ function renderDeals() {
         <div class="meta">${g.items.length} item${g.items.length === 1 ? '' : 's'} shown${inCart ? ` · <b style="color:var(--acc)">${money(inCart)} in your cart</b>` : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
         <div class="acts" style="margin-top:8px">${links(d)}</div></div>
         ${g.specials.length ? `<div class="specials">${g.specials.slice(0, 4).map(({ p }) => `<div>🏷️ <b>${esc(p.text)}</b></div>`).join('')}</div>` : ''}
-        <div class="plist">${g.items.slice(0, n).map(({ p, i }) => prodRow(d, p, i)).join('')}</div>${g.items.length ? '' : (scanning && !d.checked) ? '<div class="empty">Checking this store’s menu…</div>' : (d.products || []).length ? `<div class="empty">Nothing here matches your ${S.cat !== 'all' ? CAT_LABEL[S.cat].toLowerCase() + ' ' : ''}${fCount() || QS ? 'filters/search' : 'choice'} right now. <a href="#" data-focus="${esc(k)}" data-focusall="1">See their full menu ›</a></div>` : '<div class="empty">No product prices online for this store — call them or check their menu.</div>'}
+        <div class="plist">${g.items.slice(0, n).map(({ p, i }) => prodRow(d, p, i)).join('')}</div>${g.items.length ? '' : (scanning && !d.checked) ? '<div class="empty">Checking this store’s menu…</div>' : (d.products || []).length ? `<div class="empty">Nothing here matches your ${S.cat !== 'all' ? CAT_LABEL[S.cat].toLowerCase() + ' ' : ''}${fCount() || QS ? 'filters/search' : 'choice'} right now. <a href="#" data-focus="${esc(k)}" data-focusall="1">See their full menu ›</a></div>` : `<div class="empty">${d.from && /couldn/.test(d.from) ? 'Couldn’t find this store’s website yet.' : d.website ? 'Their website didn’t show prices BudDeals could read yet.' : 'No website found for this store.'} Call them or use the Menu button.</div>`}
         ${!S.focus && g.items.length > 8 ? `<button class="more" data-focus="${esc(k)}">Show all ${g.items.length} items from this store ›</button>` : ''}</div>`;
     }).join('')}</div>`;
   }
@@ -644,7 +644,7 @@ async function locate(center, force = false) {
     const c = await api().cached(center.lat, center.lon, S.radius);   // instant: last results for this area
     LIVE = c.dispensaries || []; render(); if (LIVE.length) stockCheck();
     toast(`Showing saved results — reading ${S.agree ? '' : '(age-gated menus skipped) '}menus near ${center.label} for live prices…`);
-    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8);
+    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8, !!S.leaflyBackup);
     LIVE = r.dispensaries || LIVE; DATA.updated = r.updated;
     $('#updated').textContent = r.updated ? `Prices checked ${ago(r.updated)}` : '';
     scanning = false; render(); runAlerts(); stockCheck();
@@ -657,7 +657,7 @@ async function locate(center, force = false) {
 async function rereadStore(host) {
   if (!S.center) return;
   toast('Re-reading that store’s menu…');
-  const r = await api().scan(S.center.lat, S.center.lon, S.radius, true, !!S.agree, host, 1);
+  const r = await api().scan(S.center.lat, S.center.lon, S.radius, true, !!S.agree, host, 1, !!S.leaflyBackup);
   mergeLive((r.dispensaries || []).filter(d => d.host === host)); render(); toast('Store menu refreshed.');
 }
 window.onScanProgress = (done, total) => { if (total) toast(`Reading menus… ${done}/${total} stores done — results fill in as each one finishes`); };
@@ -845,6 +845,7 @@ function renderSettings() {
     <div class="row" style="margin-top:6px"><label><input type="checkbox" data-set="autoUpdate" ${S.autoUpdate !== false ? 'checked' : ''}> Install updates automatically when I open BudDeals</label></div>
     <div class="row"><label><input type="checkbox" data-set="bgRefresh" ${S.bgRefresh !== false ? 'checked' : ''}> Re-read menus in the background every 30 minutes while open</label></div>
     <div class="row"><label>Look <select data-set="theme"><option value="light" ${S.theme !== 'dark' ? 'selected' : ''}>Light (easiest to read)</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Dark</option></select></label></div>
+    <div class="row"><label><input type="checkbox" data-set="leaflyBackup" ${S.leaflyBackup ? 'checked' : ''}> Use Leafly menus when a store’s own website can’t be read (off = store websites only)</label></div>
     <div class="row"><label><input type="checkbox" data-set="agree" ${S.agree ? 'checked' : ''}> Answer dispensary “18+/21+ or patient” and “agree to terms” screens for me</label></div>
     <div class="row"><label>Speed (menus read at once) <select data-set="workers">${[4, 8, 12].map(n => `<option ${+S.workers === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       <label>Text size <input type="range" min="80" max="140" step="5" value="${S.textSize || 100}" data-set="textSize"> <b>${S.textSize || 100}%</b></label></div>
