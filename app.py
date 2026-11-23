@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.1.3"
+APP_VERSION = "2.1.4"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -441,4 +441,21 @@ if __name__ == "__main__":
                 _ulog("closed an older BudDeals that was still running")
         except Exception:
             pass
+    # New version? Clear the window's cached copy of the old screens (settings, cart and sign-ins are kept).
+    vfile = os.path.join(scan.DATA_DIR, "last_version.txt")
+    try:
+        last = open(vfile, encoding="utf-8").read().strip()
+    except Exception:
+        last = ""
+    if last != APP_VERSION:
+        import shutil
+        prof = os.path.join(scan.DATA_DIR, "webview", "EBWebView", "Default")
+        for sub in ("Cache", "Code Cache", "GPUCache", os.path.join("Service Worker", "CacheStorage"), os.path.join("Service Worker", "ScriptCache")):
+            shutil.rmtree(os.path.join(prof, sub), ignore_errors=True)
+        try:
+            with open(vfile, "w", encoding="utf-8") as f:
+                f.write(APP_VERSION)
+        except Exception:
+            pass
+        _ulog(f"new version ({last or 'first run'} -> {APP_VERSION}): cleared cached screens")
     webview.start(lambda: tray and tray.start(), private_mode=False, storage_path=os.path.join(scan.DATA_DIR, "webview"))
