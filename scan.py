@@ -489,7 +489,7 @@ def leafly_stores(lat, lon, miles, area, reader=None):
                         added += 1
                     out[x["slug"]] = {
                         "id": "leafly/" + x["slug"], "name": x.get("name") or "Dispensary", "lat": a["lat"], "lon": a["lon"],
-                        "address": " ".join(v for v in [a.get("address1"), a.get("city"), a.get("state")] if v), "city": a.get("city") or "",
+                        "address": " ".join(v for v in [a.get("address1"), a.get("city"), a.get("state")] if v), "city": a.get("city") or "", "state": a.get("state") or "",
                         "phone": x.get("phone") or "", "hours": _open_text(x), "leafly": x["slug"], "hasMenu": bool(x.get("hasMenuItems")),
                         "website": "", "tag": x.get("mainTag") or "",
                     }
@@ -858,12 +858,14 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     else:
         todo = [k for k in jobs if force or time.time() - cache["sites"].get(k, {}).get("t", 0) > SITE_TTL
                 or (not use_leafly and "Leafly" in cache["sites"].get(k, {}).get("from", ""))]
-    ctx = {**area, "agree": agree}
+    base_ctx = {**area, "agree": agree}
 
     def work(k):
         if stopped():
             return False, {"t": time.time(), "deals": [], "products": []}
         rc, st = jobs[k]
+        # "pick your state" screens: the store's own state (a Seekonk MA store when searching from RI), else the searched area's
+        ctx = {**base_ctx, "state": st.get("state") or base_ctx.get("state", "")}
         if rc:
             ok, data = read_recipe(rc, st, reader, ctx)
             data["from"] = f"{re.sub(r'\s*[-–].*$', '', st['name'])} website ({st.get('city', '')} store)"

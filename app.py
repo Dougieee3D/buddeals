@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.9.0"
+APP_VERSION = "2.9.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -33,10 +33,15 @@ GATE_JS = r"""((STATE,ZIP,CITY,AGREE)=>{const T=s=>(s||'').replace(/\s+/g,' ').t
 const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};const click=e=>{try{e.click();return true}catch(x){return false}};
 const cl=()=>[...document.querySelectorAll('button,a,[role=button],[role=option],input[type=submit]')].filter(vis);let did=[];
 {const cb=cl();const dec=cb.find(b=>/^(reject|reject all|decline|deny|necessary only|only necessary|reject non-essential|decline all)$/.test(T(b.innerText).toLowerCase()));if(dec){click(dec)}else if(AGREE&&/cookie/.test(body)){const ok=cb.find(b=>/^(accept|accept all|accept cookies|ok|okay|got it|i understand|allow|allow all|close|dismiss|continue)$/.test(T(b.innerText||b.getAttribute('aria-label')).toLowerCase()));if(ok){click(ok);did.push('cookies')}}}
-if(STATE&&/(select|choose|pick) (your |a )?state|which state/.test(body)){const st=STATE.toLowerCase();
- const sel=[...document.querySelectorAll('select')].find(x=>[...x.options].some(o=>T(o.text).toLowerCase()===st));
- if(sel){const o=[...sel.options].find(o=>T(o.text).toLowerCase()===st);if(sel.value!==o.value){sel.value=o.value;sel.dispatchEvent(new Event('change',{bubbles:true}));did.push('state')}}
- else{const opt=[...document.querySelectorAll('[role=option],li,button,a,span,div,p')].filter(vis).find(e=>e.children.length<3&&T(e.innerText).toLowerCase()===st);
+const SL="Alabama AL,Alaska AK,Arizona AZ,Arkansas AR,California CA,Colorado CO,Connecticut CT,Delaware DE,District of Columbia DC,Florida FL,Georgia GA,Hawaii HI,Idaho ID,Illinois IL,Indiana IN,Iowa IA,Kansas KS,Kentucky KY,Louisiana LA,Maine ME,Maryland MD,Massachusetts MA,Michigan MI,Minnesota MN,Mississippi MS,Missouri MO,Montana MT,Nebraska NE,Nevada NV,New Hampshire NH,New Jersey NJ,New Mexico NM,New York NY,North Carolina NC,North Dakota ND,Ohio OH,Oklahoma OK,Oregon OR,Pennsylvania PA,Rhode Island RI,South Carolina SC,South Dakota SD,Tennessee TN,Texas TX,Utah UT,Vermont VT,Virginia VA,Washington WA,West Virginia WV,Wisconsin WI,Wyoming WY".split(',').map(x=>{const m=x.match(/^(.*) ([A-Z]{2})$/);return [m[1].toLowerCase(),m[2].toLowerCase()]});
+const SP=(()=>{const s=(STATE||'').toLowerCase().trim();return SL.find(p=>p[0]===s||p[1]===s)||(s?[s,s]:null)})();
+const isSt=x=>{x=T(x).toLowerCase().replace(/[^a-z ]/g,' ').replace(/\s+/g,' ').trim();return !!SP&&(x===SP[0]||x===SP[1]||x.startsWith(SP[0]+' ')||x.endsWith(' '+SP[0])||x==='shop '+SP[0])};
+const stSel=[...document.querySelectorAll('select')].filter(x=>x.options.length>=3&&[...x.options].filter(o=>SL.some(p=>T(o.text).toLowerCase()===p[0]||T(o.text).toLowerCase()===p[1])).length>=3);
+if(SP&&(stSel.length||/(select|choose|pick|confirm|enter) (your |a |the )?state|which state|what state|state you('| a)re (in|shopping)|where are you (located|shopping)/.test(body))){
+ const sel=stSel.find(x=>[...x.options].some(o=>isSt(o.text)||isSt(o.value)));
+ if(sel){const o=[...sel.options].find(o=>isSt(o.text)||isSt(o.value));if(sel.value!==o.value){sel.value=o.value;sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}));did.push('state')}
+  const go=cl().find(x=>/^(enter|continue|submit|go|confirm|shop now|start shopping|enter site|next)$/.test(T(x.innerText||x.value).toLowerCase()));if(go&&click(go))did.push('state-go')}
+ else{const opt=[...document.querySelectorAll('[role=option],li,button,a,label,span,div,p,img')].filter(vis).find(e=>e.children.length<3&&(isSt(e.innerText||'')||isSt(e.getAttribute('alt')||'')||isSt(e.getAttribute('aria-label')||'')));
   if(opt){click(opt);did.push('state')}else{const cb=[...document.querySelectorAll('[role=combobox],[aria-haspopup],select')].filter(vis)[0];if(cb){click(cb);did.push('open-state')}}}}
 if(AGREE){for(const c of [...document.querySelectorAll('input[type=checkbox]')].filter(x=>!x.checked)){const l=T((c.labels&&c.labels[0]&&c.labels[0].innerText)||((c.closest('label')||c.parentElement||{}).innerText)||'').toLowerCase();if(/(18|21|age|agree|terms|patient)/.test(l)){click(c);did.push('check')}}}
 if(AGREE&&/(21|18|age verification|verify your age|patient|over the age|of legal age|are you (over|at least|a)|adult[- ]use|recreational|medical)/.test(body)){const MED=/florida/i.test(STATE);const choose=cl().find(b=>{const t=T(b.innerText||b.value).toLowerCase();return t.length<40&&(MED?/^(medical|med|shop medical|medical menu|i'?m a (medical )?patient|i am a (medical )?patient|patient)$/:/^(adult[- ]use|recreational|rec|shop (adult[- ]use|recreational)|adult[- ]use menu|recreational menu|21\+|adult use 21\+)$/).test(t)});if(choose){click(choose);did.push('menu-type')}else{for(const b of cl()){const t=T(b.innerText||b.value).toLowerCase();if(t.length<45&&/^(yes|enter|enter site|i am 21|i'm 21|i am 18|i'm 18|i am over|i'm over|i am of (legal )?age|i'm of (legal )?age|i am a (medical )?patient|i'm a (medical )?patient|i have a medical card|i agree|agree|confirm|continue|yes,? i|verify|i'?m 21\+|21\+|over 21)/.test(t)){click(b);did.push('age');break}}}}
