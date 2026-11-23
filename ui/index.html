@@ -27,6 +27,8 @@ header.top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--b
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input,select,button,textarea{font:inherit;color:var(--txt);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:44px}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:1px}
+input[type=checkbox],input[type=radio]{min-height:0;width:22px;height:22px;padding:0;margin:0 8px 0 0;vertical-align:-5px;accent-color:var(--acc);flex:none}
+.card .row label{display:flex;align-items:center;gap:8px;color:var(--txt);font-size:16px}
 textarea{width:100%;min-height:90px}button{cursor:pointer;font-weight:600}button:hover{border-color:var(--acc)}
 button.pri{background:var(--acc);color:var(--ink);border-color:var(--acc)}button.pri:hover{filter:brightness(1.08)}
 #q{flex:1;min-width:220px;font-size:17px}
@@ -47,7 +49,7 @@ main{padding:18px 20px 40px;flex:1}
 .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.acts button.pri{background:var(--acc);color:var(--ink);border-color:var(--acc)}.acts a,.acts button:not(.pri){font-size:14px;padding:7px 12px;min-height:38px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);text-decoration:none;color:var(--txt);display:inline-flex;align-items:center}
 .star{position:absolute;top:10px;right:12px;background:none;border:0;font-size:22px;padding:0;min-height:0;color:var(--dim)}.star.on{color:var(--gold)}
 .rank{font-size:13px;color:var(--dim);margin-right:6px}label{font-size:15px;color:var(--dim)}
-.form{display:grid;gap:12px;max-width:820px}.form label{display:grid;gap:5px}
+.form{display:grid;gap:12px;max-width:820px}.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(min(480px,100%),1fr));align-items:start}.form label{display:grid;gap:5px}
 #map{height:calc(100vh - 220px);min-height:420px;border-radius:14px;border:1px solid var(--line)}.hide{display:none!important}
 .big{font-size:28px;font-weight:800;color:var(--acc)}table{width:100%;border-collapse:collapse;font-size:15px}td{padding:6px 0;border-bottom:1px solid var(--line);vertical-align:top}
 code{background:var(--panel2);padding:1px 6px;border-radius:6px}
@@ -150,8 +152,8 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
     <div class="form"><label>What do you want? One item per line — I'll find the cheapest store for the whole list, and whether splitting between two stores is worth the drive.
       <textarea id="shoplist" placeholder="eighth of blue dream&#10;1g live resin cart&#10;gummies&#10;pre-roll"></textarea></label><button class="pri" id="listgo">Find the cheapest way</button></div>
     <div class="grid" id="listres" style="margin-top:12px"></div></section>
-  <section id="t-spend" class="hide"><div id="spend" class="form" style="max-width:760px"></div></section>
-  <section id="t-settings" class="hide"><div id="settings" class="form" style="max-width:760px"></div></section>
+  <section id="t-spend" class="hide"><div id="spend" class="cols"></div></section>
+  <section id="t-settings" class="hide"><div id="settings" class="cols"></div></section>
   <section id="t-places" class="hide"><div class="grid" id="places"></div></section>
   <section id="t-map" class="hide"><div id="map"></div></section>
   <section id="t-add" class="hide">

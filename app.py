@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.2.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -393,7 +393,7 @@ class Api:
 api = Api()
 START_HIDDEN = "--tray" in sys.argv
 main = webview.create_window("BudDeals", url=os.path.join(BASE, "ui", "index.html"), js_api=api, hidden=START_HIDDEN,
-                             width=1200, height=860, min_size=(420, 600), background_color="#0f1712")
+                             width=1400, height=900, min_size=(420, 600), background_color="#f3f5f2", maximized=True)
 
 
 def _open():
