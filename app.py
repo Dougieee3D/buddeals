@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.9.1"
+APP_VERSION = "2.10.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -76,7 +76,7 @@ for(const leaf of [...document.querySelectorAll('body *')].filter(isPrice).slice
  if(!vals.length)continue;const now=vals.filter(x=>!x.s).map(x=>x.v),was=vals.filter(x=>x.s).map(x=>x.v);
  const price=now.length?Math.min(...now):Math.min(...vals.map(x=>x.v));const wasP=was.length?Math.max(...was):null;
  const name=t.split(/\n+/).map(x=>T(x.replace(/\$\s?\d[\d,.]*/g,' '))).filter(s=>s.length>3&&s.length<140&&!/\$|add to (cart|bag)|^\d+\s*%|^(sale|new|qty|quantity|in stock|sold out)/i.test(s)).sort((a,b)=>b.length-a.length)[0]||'';
- if(!name)continue;const la=card.closest('a[href]')||card.querySelector('a[href]');items.push({...XF(t),url:la?la.href:'',left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/(?<![\d.])(\d*\.\d+|\d+)\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:(t.split(/\n+/).map(T).find(x=>x.length>1&&x.length<30&&x!==name&&!/\$|%|thc|terp|^\d|indica|sativa|hybrid|sale|new|\|/i.test(x))||'')});if(items.length>=400)break}
+ if(!name)continue;const la=card.closest('a[href]')||card.querySelector('a[href]');items.push({...XF(t),url:la?la.href:'',left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,hi:now.length>1&&Math.max(...now)>price?Math.max(...now):null,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/(?<![\d.])(\d*\.\d+|\d+)\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:(t.split(/\n+/).map(T).find(x=>x.length>1&&x.length<30&&x!==name&&!/\$|%|thc|terp|^\d|indica|sativa|hybrid|sale|new|\|/i.test(x))||'')});if(items.length>=400)break}
 
 const META=/^(sale|new|indica|sativa|hybrid|cbd|thc|terp|only \d+ left|view options|add to (cart|bag)|currently|formerly|was|now|regular|as low as:?|each|limited|in stock|sold out|staff pick|best seller|popular|featured|\d+(\.\d+)?\s?(g|mg|oz|ml)|\d+\s*%\s*off|\$[\d.,]+\s*off|save .*|\|)$/i;
 let grid=null,gn=0;for(const el of document.querySelectorAll('body *')){const k=el.children;if(k.length<4||k.length>600)continue;let n=0;for(const c of k){const t=c.innerText||'';if(t.length>12&&t.length<900&&/\$\s?\d/.test(t))n++}if(n>=4&&n/k.length>=0.5&&n>gn){grid=el;gn=n}}
@@ -85,23 +85,23 @@ if(grid)for(const c of grid.children){const L=(c.innerText||'').split(/\n+/).map
  let now=null,was=null,low=null,label='';const money=x=>parseFloat(x.replace(/[$,\s]/g,''));
  for(const l of L){const lab=l.match(/^(currently|now|sale price|formerly|was|regular price|reg\.?|original|as low as:?)\s*(\$\s?[\d.,]+)?$/i);
   if(lab){label=lab[1].toLowerCase();if(lab[2]){const v=money(lab[2]);if(/as low/.test(label))low=v;else if(/formerly|was|reg|original/.test(label))was=v;else now=v;label=''}continue}
-  if(/^(\$\s?[\d.,]+\s*)+$/.test(l)){const vs=[...l.matchAll(/\$\s?([\d.,]+)/g)].map(m=>money(m[1]));for(const v of vs){if(/formerly|was|reg|original/.test(label))was=v;else if(/as low/.test(label))low=v;else if(now==null)now=v;else if(was==null&&v>now)was=v}label='';continue}
+  if(/^(\$\s?[\d.,]+\s*)+$/.test(l)){const vs=[...l.matchAll(/\$\s?([\d.,]+)/g)].map(m=>money(m[1]));for(const v of vs){if(/formerly|was|reg|original/.test(label))was=v;else if(/as low/.test(label))low=v;else if(now==null)now=v;else if(was==null&&v>now&&/sale|% ?off|save|deal|special/i.test(c.innerText||''))was=v}label='';continue}
   const al=l.match(/as low as:?\s*\$\s?([\d.,]+)/i);if(al)low=money(al[0].replace(/as low as:?/i,''))}
  for(const e of c.querySelectorAll('*')){if(e.children.length||!/^\$\s?[\d.,]+$/.test(T(e.textContent)))continue;if(/^(S|DEL|STRIKE)$/.test(e.tagName)||getComputedStyle(e).textDecorationLine.includes('line-through')||(e.parentElement&&getComputedStyle(e.parentElement).textDecorationLine.includes('line-through'))){const v=parseFloat(T(e.textContent).replace(/[^\d.]/g,''));if(v>0){was=v;if(now===v)now=null}}}
  const allP=[...(c.innerText||'').matchAll(/\$\s?([\d.,]+)(?!\s*off)/gi)].map(m=>money(m[1])).filter(v=>v>0&&v!==was);if(now==null&&allP.length)now=Math.min(...allP);
- const price=now??low;if(!(price>0))continue;
+ const price0=now??low;const price=allP.length&&price0>Math.min(...allP)&&!was?Math.min(...allP):price0;if(!(price>0))continue;const hi=allP.length>1&&Math.max(...allP)>price&&Math.max(...allP)!==was?Math.max(...allP):null;
  const brandLine=L.find(l=>/\bby\s+\S/i.test(l)&&l.length<60);const brand=brandLine?brandLine.replace(/^.*?\bby\s+/i,''):'';
  const cand=L.filter(l=>l.length>2&&l.length<100&&l!==brandLine&&!META.test(l)&&!/\$|%|:\s|^\d/.test(l));
  const name=cand.sort((a,b)=>b.length-a.length)[0]||'';if(!name)continue;
 const pa=[...c.querySelectorAll('a[href]')].map(a=>a.href).find(h=>{try{const u=new URL(h);return u.hostname===location.hostname&&u.pathname.length>1&&h.split('#')[0]!==location.href&&!/cart|login|account|category\/?$|wishlist|\?page=/i.test(h)}catch(e){return false}})||'';
- const t=L.join('\n');items2.push({...XF(t),url:pa,left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,was:was&&was>price?was:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/(?<![\d.])(\d*\.\d+|\d+)\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/THC:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:brand||(cand.length>1?cand.filter(x=>x!==name).sort((a,b)=>a.length-b.length)[0]:'')})}
+ const t=L.join('\n');items2.push({...XF(t),url:pa,left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,hi,was:was&&was>price?was:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/(?<![\d.])(\d*\.\d+|\d+)\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/THC:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:brand||(cand.length>1?cand.filter(x=>x!==name).sort((a,b)=>a.length-b.length)[0]:'')})}
 const useItems=items2.length>=items.length?items2:items;
 const host=location.hostname;const links=[...document.querySelectorAll('a[href]')].map(a=>({h:a.href.split('#')[0],t:T(a.innerText).toLowerCase()})).filter(x=>{try{return new URL(x.h).hostname===host&&x.h!==location.href}catch(e){return false}});
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
 const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
 const embeds=[...document.querySelectorAll('iframe[src]')].map(f=>f.src).filter(u=>/dutchie|iheartjane|\bjane\b|sweed|weedmaps|tymber|blaze|meadow|dispenseapp|treez|flowhub|joint|alpine|grassdoor|leafbuyer|olla/i.test(u)&&!/leafly/i.test(u)).slice(0,3);
 const dbg=useItems.length?null:{title:document.title,text:T(document.body.innerText).slice(0,400),frames:[...document.querySelectorAll('iframe')].map(f=>f.src||'(no src)').slice(0,6),scripts:[...document.scripts].map(x=>x.src).filter(u=>/dutchie|jane|sweed|tymber|weedmaps|blaze|meadow|treez|flowhub|joint|alpine|olla|leafly/i.test(u)).slice(0,6),buttons:[...document.querySelectorAll('button,a[role=button]')].map(b=>T(b.innerText)).filter(Boolean).slice(0,15)};
-return JSON.stringify({url:location.href,dbg,embeds,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products/)])].filter(h=>!bad.test(h)).slice(0,8)})})()"""
+return JSON.stringify({url:location.href,dbg,embeds,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products|tincture|topical|accessor|gear|cbd|beverage|drink|oral|capsule|gumm|chocolate|wellness|other/)])].filter(h=>!bad.test(h)).slice(0,16)})})()"""
 
 
 class BrowserReader:

@@ -293,7 +293,8 @@ def _product(x, src):
     return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats, "grams": grams,
             "url": url if url.startswith("http") else "", "terp": num(x.get("terp")), "cbd": num(x.get("cbd")), "terps": terps, "left": int(left) if str(left or "").isdigit() else None,
             "thc": thc, "mgThc": round(mg_thc) if mg_thc else None, "brand": str(x.get("brand") or "")[:60],
-            "type": str(x.get("strain") or "")[:20], "src": src}
+            "type": str(x.get("strain") or "")[:20], "src": src,
+            "hi": num(x.get("hi")) if num(x.get("hi")) and num(x.get("hi")) > price else None}
 
 
 def read_site(website, reader=None, ctx=None, known_pages=None):
@@ -302,8 +303,8 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
     base = website if re.match(r"https?:", website, re.I) else "https://" + website
     start = list(dict.fromkeys(known_pages or [])) or [base]
     pages, seen, deals, products, ok, useful, dbg = start[:], set(), [], [], False, [], []
-    limit = max(len(start), 9 if reader else 4)
-    t_end = time.time() + 75
+    limit = max(len(start), 18 if reader else 4)  # home page + every category page (edibles, topicals, accessories…)
+    t_end = time.time() + 120
     i = 0
     while i < len(pages) and i < limit and time.time() < t_end:
         url = pages[i]
@@ -336,7 +337,7 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
             if prods or lines:
                 useful.append(url)
             if len(seen) == 1 and not known_pages:
-                pages += links[:8] if reader else (links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")])
+                pages += links[:16] if reader else (links[:3] or [urllib.parse.urljoin(base, "/deals"), urllib.parse.urljoin(base, "/specials")])
         except Exception:
             pass
     if reader and not products and not (known_pages and ok):
@@ -600,9 +601,9 @@ RECIPES = [
     {"key": "muv", "rx": r"\bm[uü]v\b", "site": "https://muvfl.com",
      "pages": lambda st: [f"https://muvfl.com/locations/{slug(st['city'])}/menu/menu/discounts?promo=products",
                           f"https://muvfl.com/locations/{slug(st['city'])}/menu/menu"],
-     "follow": lambda st: rf"/locations/{slug(st['city'])}/menu/menu/(flower|pre-rolls|vapes|edibles|concentrates)-\d+$", "more": 3},
+     "follow": lambda st: rf"/locations/{slug(st['city'])}/menu/menu/(flower|pre-rolls|vapes|edibles|concentrates|tinctures|oral|topicals|accessories|cbd|wellness|other)-\d+$", "more": 3},
     {"key": "trulieve", "rx": r"trulieve", "site": "https://www.trulieve.com",
-     "pages": lambda st: [f"https://www.trulieve.com/category/{c}" for c in ("flower", "vapes", "concentrates", "edibles")],
+     "pages": lambda st: [f"https://www.trulieve.com/category/{c}" for c in ("flower", "pre-rolls", "vapes", "concentrates", "edibles", "oral", "topicals", "accessories")],
      "follow": None, "more": 3},
     {"key": "sunnyside", "rx": r"sunnyside", "site": "https://www.sunnyside.shop", "pages": lambda st: ["https://www.sunnyside.shop"], "generic": True, "more": 3},
     {"key": "greendragon", "rx": r"green dragon", "site": "https://greendragon.com", "pages": lambda st: ["https://greendragon.com"], "generic": True, "more": 3},
@@ -713,7 +714,7 @@ def _search_links(query):
     return links
 
 
-DUTCHIE_CATS = ("flower", "pre-rolls", "vaporizers", "concentrates", "edibles", "tinctures", "topicals")
+DUTCHIE_CATS = ("flower", "pre-rolls", "vaporizers", "concentrates", "edibles", "tinctures", "topicals", "accessories", "cbd")
 
 
 def ordering_menu(store, area, cache):

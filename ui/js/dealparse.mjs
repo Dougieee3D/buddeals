@@ -1,6 +1,6 @@
 // Shared deal-text parser — used by the web app and the GitHub Action scraper.
 export const CATS = ['flower', 'preroll', 'vape', 'concentrate', 'edible', 'tincture', 'topical', 'accessory'];
-export const CAT_LABEL = { all: 'Everything', flower: 'Flower', preroll: 'Pre-rolls', vape: 'Vapes', concentrate: 'Concentrates', edible: 'Edibles', tincture: 'Tinctures/Oils', topical: 'Topicals', accessory: 'Accessories' };
+export const CAT_LABEL = { all: 'Everything', flower: 'Flower', preroll: 'Pre-rolls', vape: 'Vapes', concentrate: 'Concentrates', edible: 'Edibles', tincture: 'Tinctures/Oils', topical: 'Topicals', accessory: 'Accessories', other: 'Other' };
 
 const CAT_RX = {
   flower: /\b(flower|eighths?|1\/8s?|quarters?|1\/4s?|half ?oz|ounces?|oz|smalls|shake|popcorn|buds?|whole flower|ground flower)\b/i,

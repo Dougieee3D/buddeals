@@ -28,6 +28,7 @@ a{color:var(--acc);font-weight:600}
 #pbar .pfill{height:100%;width:0;border-radius:7px;background:var(--accent,#2e7d32);transition:width .4s ease}
 #pbar.done .pfill{background:#2e7d32}#pbar.stopped .pfill{background:#9e9e9e}
 #pbar .ptext{font-size:16px;font-weight:600;white-space:nowrap;min-width:260px;text-align:right}
+.rng{font-size:14px;color:var(--muted,#888);margin-top:2px;white-space:nowrap}
 header.top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;flex-direction:column;gap:10px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input,select,button,textarea{font:inherit;color:var(--txt);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:44px}
@@ -238,10 +239,10 @@ function build() {
 const CAT_RULES = [
   ['preroll', /pre-?rolls?|\bjoints?\b|\bblunts?\b|dogwalkers?|\bminis? (pre)?roll/i],
   ['vape', /\bcart(ridge)?s?\b|\bvapes?\b|\bpods?\b|disposables?|\baio\b|all[- ]in[- ]one|\bpax\b|\bcliq\b|\bpen\b/i],
-  ['accessory', /batter(y|ies)|rolling papers?|\bpapers?\b|grinders?|\bglass\b|\bpipes?\b|\bbongs?\b|lighters?|\bcones?\b|\btrays?\b|merch|shirts?|\bhats?\b|hoodie|apparel|accessor/i],
-  ['edible', /gumm(y|ies)|chocolates?|edibles?|\bchews?\b|\bmints?\b|beverages?|drinks?|lozenges?|\bcandy|\bbites?\b|cookies? \d/i],
-  ['tincture', /tinctures?|capsules?|tablets?|sublingual|\boral\b|\bsprays?\b|syringes?|\brso\b/i],
-  ['topical', /topicals?|lotions?|balms?|creams?|salves?|patch(es)?|transdermal|bath/i],
+  ['accessory', /batter(y|ies)|rolling papers?|\bpapers?\b|grinders?|\bglass\b|\bpipes?\b|\bbongs?\b|lighters?|\bcones?\b|\btrays?\b|merch|shirts?|\bhats?\b|hoodie|apparel|accessor|\btorch\b|dab rig|\brigs?\b|bubbler|\bwraps?\b|\bstickers?\b|\bdevice\b|\bpuffco\b|storz|volcano|ashtray|\btips?\b|\bfilters?\b|\bscale\b/i],
+  ['edible', /gumm(y|ies)|chocolates?|edibles?|\bchews?\b|\bmints?\b|beverages?|drinks?|lozenges?|\bcandy|\bbites?\b|cookies? \d|\bsoda\b|seltzer|brownies?|taffy|pastilles?|\bmarshmallow|\bfruit chews?\b/i],
+  ['tincture', /tinctures?|capsules?|tablets?|sublingual|\boral\b|\bsprays?\b|syringes?|\brso\b|softgels?|\bfeco\b/i],
+  ['topical', /topicals?|lotions?|balms?|creams?|salves?|patch(es)?|transdermal|\bbath\b|bath bomb|roll-?on|massage oil|\brub\b|\bgel\b|serum|lip balm|suppositor/i],
   ['flower', /\bflower\b|\bsmalls\b|\bshake\b|popcorn|\bground\b|whole flower|\beighths?\b|\bbuds?\b|\b(3\.5|7|14|28)\s?g\b(?!.*(wax|rosin|resin|badder|budder|diamond|sauce|crumble|shatter))/i],
   ['concentrate', /concentrates?|\bwax\b|shatter|rosin|badder|budder|batter\b|diamonds?|crumble|live resin|\bsauce\b|\bdabs?\b|\bhash\b|\bsugar wax\b|\bkief\b|distillate/i],
 ];
@@ -254,7 +255,14 @@ function primaryCat(x) {
   for (const [c, rx] of CAT_RULES) if (rx.test(path.replace(/[-_/]/g, ' '))) return c;
   if (/vapes?|vaporizers?|cartridges?/.test(path)) return 'vape';
   if (/concentrates?/.test(path)) return 'concentrate';
+  if (/accessor|gear|merch/.test(path)) return 'accessory';
+  if (/topical/.test(path)) return 'topical';
+  if (/tincture|oral|capsule/.test(path)) return 'tincture';
+  if (/edible|gumm|chocolate|beverage|drink/.test(path)) return 'edible';
+  if (/pre-?roll/.test(path)) return 'preroll';
+  if (/flower/.test(path)) return 'flower';
   if (x.mgThc && !x.grams) return 'edible';
+  if (/\b\d+\s?mg\b/i.test(name)) return 'edible';
   return 'other';
 }
 // Size in grams from a product name: ".5g" = 0.5 (not 5), "1/8" = 3.5, "1g", "28 g", "oz".
@@ -275,7 +283,7 @@ function productDeal(x) {
   return { text: x.name, cats: [primaryCat(x)], days: null, groups: [], newOnly: false, expired: false, threshold: 0, kind: 'item', item: true,
     pct, score: (pct >= 0.01 ? pct : 0) + (x.isLow ? 0.05 : 0), label: pct >= 0.01 ? `${Math.round(pct * 100)}% OFF` : money(x.price),
     price: x.price, was: x.was, ppg, p100, grams: x.grams, thc: x.thc, terp: x.terp, cbd: x.cbd, terps: x.terps || [], mgThc: x.mgThc, brand: x.brand, type: x.type,
-    isLow: x.isLow, inflated: x.inflated, typical: x.typical, daysSeen: x.daysSeen, src: x.src, url: x.url || '', left: x.left };
+    isLow: x.isLow, inflated: x.inflated, typical: x.typical, daysSeen: x.daysSeen, src: x.src, url: x.url || '', left: x.left, hi: x.hi || null };
 }
 const storeKey = d => d.host || norm(d.name);
 const usedKey = (d, p) => storeKey(d) + '|' + norm(p.text);
@@ -351,7 +359,7 @@ function prodRow(d, p, i) {
   const tags = `${p.isLow ? '<span class="tag today">Lowest price in 30 days</span>' : ''}${p.inflated ? `<span class="tag warn">Usual price is ${money(p.typical)} — not a real sale</span>` : ''}${p.left ? `<span class="tag warn">Only ${p.left} left</span>` : ''}`;
   return `<div class="prod">
     <div><div class="pname">${gradeBadge(p)}${esc(p.text)}</div>${sub ? `<div class="psub">${sub}</div>` : ''}${tags ? `<div>${tags}</div>` : ''}</div>
-    <div class="pprice">${hasSale ? `<div class="off">${Math.round(p.pct * 100)}% OFF</div>` : ''}<div class="now">${money(p.price)}</div>${p.was ? `<s>${money(p.was)}</s>` : ''}</div>
+    <div class="pprice">${hasSale ? `<div class="off">${Math.round(p.pct * 100)}% OFF</div>` : ''}<div class="now">${money(p.price)}</div>${p.was ? `<s>${money(p.was)}</s>` : ''}${p.hi ? `<div class="rng" title="Other sizes of this product">Sizes ${money(p.price)}–${money(p.hi)}</div>` : ''}</div>
     <div class="pact"><button class="add" data-add="${i}">＋ Add to cart</button>${(p.url || p.src) ? `<a target="_blank" rel="noopener" href="${esc(p.url || p.src)}">View product</a>` : ''}
       <button class="lnk small" data-watch="${i}" title="Tell me when this goes on sale">🔔 Alert me</button><button class="lnk small" data-compare="${i}">Compare stores</button><button class="lnk small" data-used="${i}" title="Hide this">Hide</button></div>
   </div>`;
@@ -628,7 +636,8 @@ function render() {
   const cartN = (S.cart || []).reduce((n, x) => n + x.qty, 0), cartT = (S.cart || []).reduce((n, x) => n + x.qty * x.price, 0);
   $('#cartpill').textContent = cartN ? `🛒 Cart · ${cartN} item${cartN > 1 ? 's' : ''} · ${money(cartT)}` : '🛒 Cart is empty';
   $('#tabs').innerHTML = TABS.map(([k, i, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}"><span>${i}</span>${n}${k === 'cart' && cartN ? `<span class="n">${cartN}</span>` : ''}</button>`).join('');
-  $('#cats').innerHTML = ['all', ...CATS].map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-cat="${c}">${CAT_LABEL[c]}</button>`).join('');
+  const hasOther = DISPS.some(d => d.parsed.some(p => p.item && p.cats[0] === 'other'));
+  $('#cats').innerHTML = ['all', ...CATS, ...(hasOther ? ['other'] : [])].map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-cat="${c}">${CAT_LABEL[c]}</button>`).join('');
   build(); banner(); if (S.fopen) renderFilters();
   { const seen = new Map(); for (const d of DISPS) { const k = storeKey(d); if (!seen.has(k) || d.dist < seen.get(k).dist) seen.set(k, d); }
     if (S.focus && !seen.has(S.focus)) S.focus = '';
