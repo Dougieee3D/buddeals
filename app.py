@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.3"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -432,4 +432,13 @@ main.events.closing += _closing
 if __name__ == "__main__":
     os.makedirs(scan.DATA_DIR, exist_ok=True)
     _ulog(f"BudDeals {APP_VERSION} started ({sys.executable})")
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        # Only one BudDeals at a time: close any older copy (e.g. one left in the tray) so it can't keep stale code running.
+        try:
+            r = subprocess.run(["taskkill", "/F", "/FI", "IMAGENAME eq BudDeals.exe", "/FI", f"PID ne {os.getpid()}"],
+                               capture_output=True, text=True, timeout=10, creationflags=0x08000000)
+            if "SUCCESS" in (r.stdout or ""):
+                _ulog("closed an older BudDeals that was still running")
+        except Exception:
+            pass
     webview.start(lambda: tray and tray.start(), private_mode=False, storage_path=os.path.join(scan.DATA_DIR, "webview"))
