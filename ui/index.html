@@ -69,6 +69,8 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
 .pact .add{background:var(--acc);color:var(--ink);border-color:var(--acc);min-height:38px;padding:6px 14px}
 .pact a,.pact .lnk{font-size:14px;min-height:38px;padding:6px 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel);text-decoration:none;display:inline-flex;align-items:center;color:var(--txt);font-weight:600}
 .pact .lnk.small{border:0;background:none;color:var(--dim);padding:6px 6px;min-height:0;font-size:13px}
+.stores.focus{grid-template-columns:1fr}.stores.focus .plist{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(440px,100%),1fr))}.stores.focus .prod{border-right:1px solid var(--line)}
+.shead h3 a{color:var(--txt);text-decoration:none}.shead h3 a:hover{color:var(--acc);text-decoration:underline}
 .more{display:block;width:100%;border:0;border-top:1px solid var(--line);border-radius:0;background:var(--panel2);color:var(--acc);padding:12px}
 .grade{display:inline-grid;place-items:center;min-width:24px;height:24px;border-radius:7px;font-weight:800;font-size:13px;margin-right:7px;color:#06210f;vertical-align:1px}
 .empty{padding:16px;color:var(--dim)}
@@ -101,6 +103,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
       <select id="sort" title="Sort">
         <option value="score">Biggest discount</option><option value="ppg">Cheapest per gram</option><option value="price">Lowest price</option><option value="thc">Best THC value</option><option value="near">Best deal nearby</option><option value="dist">Closest store</option>
       </select>
+      <select id="storesel" title="Show one store" style="max-width:280px"></select>
       <div class="seg" id="viewseg"><button data-view="stores">By store</button><button data-view="list">All in one list</button></div>
       <label><input type="checkbox" id="favonly" style="min-height:0;width:18px;height:18px;vertical-align:-3px"> ⭐ Favorite stores only</label>
     </div>
@@ -219,17 +222,40 @@ function build() {
   $('#dnames').innerHTML = DISPS.map(d => `<option value="${esc(d.name)}">`).join('');
   $('#dsites').innerHTML = [...new Set(DISPS.filter(d => d.website).map(d => d.website))].map(w => `<option value="${esc(w)}">`).join('');
 }
+const CAT_RULES = [
+  ['preroll', /pre-?rolls?|\bjoints?\b|\bblunts?\b|dogwalkers?|\bminis? (pre)?roll/i],
+  ['vape', /\bcart(ridge)?s?\b|\bvapes?\b|\bpods?\b|disposables?|\baio\b|all[- ]in[- ]one|\bpax\b|\bcliq\b|\bpen\b/i],
+  ['accessory', /batter(y|ies)|rolling papers?|\bpapers?\b|grinders?|\bglass\b|\bpipes?\b|\bbongs?\b|lighters?|\bcones?\b|\btrays?\b|merch|shirts?|\bhats?\b|hoodie|apparel|accessor/i],
+  ['edible', /gumm(y|ies)|chocolates?|edibles?|\bchews?\b|\bmints?\b|beverages?|drinks?|lozenges?|\bcandy|\bbites?\b|cookies? \d/i],
+  ['tincture', /tinctures?|capsules?|tablets?|sublingual|\boral\b|\bsprays?\b|syringes?|\brso\b/i],
+  ['topical', /topicals?|lotions?|balms?|creams?|salves?|patch(es)?|transdermal|bath/i],
+  ['flower', /\bflower\b|\bsmalls\b|\bshake\b|popcorn|\bground\b|whole flower|\beighths?\b|\bbuds?\b|\b(3\.5|7|14|28)\s?g\b(?!.*(wax|rosin|resin|badder|budder|diamond|sauce|crumble|shatter))/i],
+  ['concentrate', /concentrates?|\bwax\b|shatter|rosin|badder|budder|batter\b|diamonds?|crumble|live resin|\bsauce\b|\bdabs?\b|\bhash\b|\bsugar wax\b|\bkief\b|distillate/i],
+];
+function primaryCat(x) {
+  const name = String(x.name || '');
+  for (const [c, rx] of CAT_RULES) if (rx.test(name)) return c;
+  const given = (x.cats || []).filter(c => c !== 'all');
+  if (given.length === 1) return given[0];
+  const path = decodeURIComponent(String(x.src || '')).toLowerCase();
+  for (const [c, rx] of CAT_RULES) if (rx.test(path.replace(/[-_/]/g, ' '))) return c;
+  if (/vapes?|vaporizers?|cartridges?/.test(path)) return 'vape';
+  if (/concentrates?/.test(path)) return 'concentrate';
+  if (x.mgThc && !x.grams) return 'edible';
+  return 'other';
+}
 function productDeal(x) {
   const pct = x.was && !x.inflated ? 1 - x.price / x.was : 0, ppg = x.grams ? x.price / x.grams : null;
   const p100 = x.mgThc ? x.price / x.mgThc * 100 : null;
-  return { text: x.name, cats: x.cats || ['all'], days: null, groups: [], newOnly: false, expired: false, threshold: 0, kind: 'item', item: true,
+  return { text: x.name, cats: [primaryCat(x)], days: null, groups: [], newOnly: false, expired: false, threshold: 0, kind: 'item', item: true,
     pct, score: (pct >= 0.01 ? pct : 0) + (x.isLow ? 0.05 : 0), label: pct >= 0.01 ? `${Math.round(pct * 100)}% OFF` : money(x.price),
     price: x.price, was: x.was, ppg, p100, grams: x.grams, thc: x.thc, mgThc: x.mgThc, brand: x.brand, type: x.type,
     isLow: x.isLow, inflated: x.inflated, typical: x.typical, daysSeen: x.daysSeen, src: x.src, url: x.url || '', left: x.left };
 }
 const storeKey = d => d.host || norm(d.name);
 const usedKey = (d, p) => storeKey(d) + '|' + norm(p.text);
-const shopped = d => (S.shopped || []).some(k => k === storeKey(d) || k === norm(d.name));
+const shopped = d => (S.shopped || []).some(k => k === d.id || k === storeKey(d) || k === norm(d.name));
+const catOk = (p, cat) => p.item ? (cat === 'all' || p.cats[0] === cat) : matchesCat(p, cat);
 function hidden(d, p) {
   const hay = `${p.text} ${p.brand || ''} ${d.name}`.toLowerCase();
   return (S.hide || []).some(w => w && hay.includes(w.toLowerCase()));
@@ -239,7 +265,7 @@ function visibleDeals() {
   for (const d of DISPS) {
     if (S.favonly && !favs.has(d.id)) continue;
     for (const p of d.parsed) {
-      if (p.expired || !appliesToday(p) || (p.newOnly && shopped(d)) || S.used?.[usedKey(d, p)] || !matchesCat(p, S.cat) || hidden(d, p)) continue;
+      if (p.expired || !appliesToday(p) || (p.newOnly && shopped(d)) || S.used?.[usedKey(d, p)] || !catOk(p, S.cat) || hidden(d, p)) continue;
       if (QS && !`${p.text} ${p.brand || ''} ${p.type || ''} ${d.name}`.toLowerCase().includes(QS)) continue;
       out.push({ d, p });
     }
@@ -277,7 +303,7 @@ function renderDeals() {
   if (!list.length) {
     $('#deals').innerHTML = `<div class="card empty">${!S.center ? 'Type your ZIP code at the top and press <b>Search</b>, or press <b>📍 Find me</b>.' : scanning ? 'Checking each store’s menu now — prices appear here as each store finishes.' : `No ${S.cat === 'all' ? '' : CAT_LABEL[S.cat].toLowerCase() + ' '}deals found within ${S.radius} miles${QS ? ` for “${esc(QS)}”` : ''}. Try a bigger distance or press <b>🔄 Refresh prices</b>.`}</div>`;
   } else if (S.view === 'list') {
-    $('#deals').innerHTML = `<div class="store">${list.slice(0, 300).map(({ d, p }, i) => p.item ? prodRow(d, p, i).replace('<div class="pname">', `<div class="psub"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi</div><div class="pname">`)
+    $('#deals').innerHTML = `<div class="store">${list.filter(x => !S.focus || storeKey(x.d) === S.focus).slice(0, 300).map(({ d, p }, i) => p.item ? prodRow(d, p, i).replace('<div class="pname">', `<div class="psub"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi</div><div class="pname">`)
       : `<div class="prod"><div><div class="pname">${gradeBadge(p)}${esc(p.label)}</div><div class="psub">${esc(p.text)}</div><div class="psub"><b>${esc(d.name)}</b> · ${d.dist.toFixed(1)} mi</div></div><div class="pact"><button class="lnk small" data-used="${i}">Hide</button></div></div>`).join('')}</div>`;
   } else {
     const groups = new Map();
@@ -289,24 +315,27 @@ function renderDeals() {
       (p.item ? g.items : g.specials).push({ p, i });
     });
     let gs = [...groups.values()];
+    if (S.focus) gs = gs.filter(g => storeKey(g.d) === S.focus);
     if (S.sort === 'dist') gs.sort((a, b) => a.d.dist - b.d.dist);
     else gs.sort((a, b) => (b.items.length ? 1 : 0) - (a.items.length ? 1 : 0) || list.findIndex(x => storeKey(x.d) === storeKey(a.d)) - list.findIndex(x => storeKey(x.d) === storeKey(b.d)));
-    $('#deals').innerHTML = `<div class="stores">${gs.map(g => {
-      const d = g.d, k = storeKey(d), open = /^open/i.test(d.hours || ''), n = S.expanded[k] ? 999 : 8;
+    $('#deals').innerHTML = (S.focus ? `<div class="acts" style="margin:0 0 12px"><button class="pri" data-unfocus="1">← Back to all stores</button></div>` : '') + `<div class="stores${S.focus ? ' focus' : ''}">${gs.map(g => {
+      const d = g.d, k = storeKey(d), open = /^open/i.test(d.hours || ''), n = S.focus || S.expanded[k] ? 9999 : 8;
       const others = [...g.others.values()].sort((a, b) => a.dist - b.dist).slice(0, 3);
       const inCart = (S.cart || []).filter(x => x.storeKey === k).reduce((s, x) => s + x.qty * x.price, 0);
-      return `<div class="store"><div class="shead">${star(d)}<h3>${esc(d.name)}</h3>
+      return `<div class="store"><div class="shead">${star(d)}<h3>${S.focus ? esc(d.name) : `<a href="#" data-focus="${esc(k)}" title="Show only this store">${esc(d.name)} ›</a>`}</h3>
         <div class="meta">${d.dist.toFixed(1)} miles away${d.hours ? ` · <span class="${open ? 'open' : 'closed'}">${esc(d.hours)}</span>` : ''}</div>
         ${others.length ? `<div class="meta">Same prices at: ${others.map(o => `${esc(o.city || o.name)} (${o.dist.toFixed(0)} mi)`).join(', ')}</div>` : ''}
         <div class="meta">${g.items.length} item${g.items.length === 1 ? '' : 's'} shown${inCart ? ` · <b style="color:var(--acc)">${money(inCart)} in your cart</b>` : ''}${d.checked ? ` · checked ${ago(d.checked)}` : ''}</div>
         <div class="acts" style="margin-top:8px">${links(d)}</div></div>
         ${g.specials.length ? `<div class="specials">${g.specials.slice(0, 4).map(({ p }) => `<div>🏷️ <b>${esc(p.text)}</b></div>`).join('')}</div>` : ''}
-        ${g.items.slice(0, n).map(({ p, i }) => prodRow(d, p, i)).join('') || '<div class="empty">No product prices online for this store — call them or check their menu.</div>'}
-        ${g.items.length > 8 ? `<button class="more" data-expand="${esc(k)}">${S.expanded[k] ? 'Show fewer' : `Show all ${g.items.length} items`}</button>` : ''}</div>`;
+        <div class="plist">${g.items.slice(0, n).map(({ p, i }) => prodRow(d, p, i)).join('')}</div>${g.items.length ? '' : '<div class="empty">No product prices online for this store — call them or check their menu.</div>'}
+        ${!S.focus && g.items.length > 8 ? `<button class="more" data-focus="${esc(k)}">Show all ${g.items.length} items from this store ›</button>` : ''}</div>`;
     }).join('')}</div>`;
   }
   $('#deals').onclick = e => {
-    const b = e.target.closest('[data-add],[data-used],[data-reread],[data-watch],[data-compare],[data-expand],[data-share]'); if (!b) return;
+    const b = e.target.closest('[data-add],[data-used],[data-reread],[data-watch],[data-compare],[data-expand],[data-share],[data-focus],[data-unfocus]'); if (!b) return;
+    if (b.dataset.focus) { e.preventDefault(); S.focus = b.dataset.focus; render(); window.scrollTo(0, 0); return; }
+    if (b.dataset.unfocus) { S.focus = ''; render(); return; }
     if (b.dataset.expand) { S.expanded = { ...S.expanded, [b.dataset.expand]: !S.expanded[b.dataset.expand] }; return render(); }
     const ent = list[+(b.dataset.add ?? b.dataset.used ?? b.dataset.watch ?? b.dataset.compare ?? b.dataset.share)];
     if (b.dataset.add) return addToCart(ent.d, ent.p);
@@ -433,7 +462,7 @@ async function share({ d, p }) {
 function renderPlaces() {
   $('#places').innerHTML = DISPS.filter(d => !S.favonly || favs.has(d.id)).map(d => {
     const today = d.parsed.filter(p => !p.expired && appliesToday(p)).length;
-    const prods = (d.products || []).filter(x => matchesCat(x, S.cat)).sort((a, b) => a.price - b.price).slice(0, 5);
+    const prods = (d.products || []).filter(x => catOk({ item: true, cats: [primaryCat(x)] }, S.cat)).sort((a, b) => a.price - b.price).slice(0, 5);
     return `<div class="card">${star(d)}<b>${esc(d.name)}</b><div class="meta">${d.dist.toFixed(1)} mi${d.address ? ' · ' + esc(d.address) : ''}</div>
       ${d.hours ? `<div class="meta">🕒 ${esc(d.hours)}</div>` : ''}
       <div class="meta">${today ? `<span class="tag today">${today} deal${today > 1 ? 's' : ''} today</span>` : d.website ? 'No deals read from their site — check the menu' : 'No website listed'}
@@ -449,8 +478,8 @@ function renderPlan() {
   const pay = B / (1 + (+S.tax || 0) / 100);
   const rows = DISPS.filter(d => !S.favonly || favs.has(d.id)).map(d => {
     const rewards = d.wallet.reduce((s, w) => s + (w.dollars || 0) + (w.points || 0) * (w.ppv || 0), 0);
-    const deals = d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && !(p.newOnly && shopped(d)) && !S.used?.[usedKey(d, p)] && matchesCat(p, S.cat) && !hidden(d, p));
-    const cand = (d.products || []).filter(x => matchesCat({ cats: x.cats || ['all'] }, S.cat) && !hidden(d, { text: x.name, brand: x.brand }) && !S.used?.[usedKey(d, { text: x.name })])
+    const deals = d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && !(p.newOnly && shopped(d)) && !S.used?.[usedKey(d, p)] && catOk(p, S.cat) && !hidden(d, p));
+    const cand = (d.products || []).filter(x => catOk({ item: true, cats: [primaryCat(x)] }, S.cat) && !hidden(d, { text: x.name, brand: x.brand }) && !S.used?.[usedKey(d, { text: x.name })])
       .map(x => ({ ...x, pct: x.was ? 1 - x.price / x.was : 0, ppg: x.grams ? x.price / x.grams : null }))
       .sort((a, b) => (b.pct >= 0.01) - (a.pct >= 0.01) || b.pct - a.pct || (a.ppg ?? 1e9) - (b.ppg ?? 1e9) || a.price - b.price);
     const cart = [], names = new Set(); let spent = 0;
@@ -496,7 +525,7 @@ function renderMap() {
   layer.clearLayers();
   if (S.center) { L.circle([S.center.lat, S.center.lon], { radius: S.radius * 1609.34, color: '#5ee08a', weight: 1, fillOpacity: 0.04 }).addTo(layer); map.setView([S.center.lat, S.center.lon], S.radius > 60 ? 8 : S.radius > 25 ? 9 : 11); }
   for (const d of DISPS) {
-    const best = d.parsed.filter(p => !p.expired && appliesToday(p) && matchesCat(p, S.cat)).sort((a, b) => b.score - a.score)[0];
+    const best = d.parsed.filter(p => !p.expired && appliesToday(p) && catOk(p, S.cat)).sort((a, b) => b.score - a.score)[0];
     L.circleMarker([d.lat, d.lon], { radius: best ? 9 : 5, color: best ? '#ffd54a' : '#5ee08a', fillOpacity: 0.8 }).addTo(layer)
       .bindPopup(`<b>${esc(d.name)}</b><br>${d.dist.toFixed(1)} mi${best ? `<br><b>${esc(best.label)}</b>: ${esc(best.text)}` : ''}<br><a target="_blank" href="https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lon}">Directions</a>`);
   }
@@ -523,13 +552,17 @@ function render() {
   for (const [t] of TABS) $('#t-' + t).classList.toggle('hide', S.tab !== t);
   document.documentElement.dataset.theme = S.theme === 'dark' ? 'dark' : 'light';
   $('#toolbar').classList.toggle('hide', !['deals', 'budget', 'list', 'places', 'map'].includes(S.tab));
-  $('#viewseg').classList.toggle('hide', S.tab !== 'deals');
+  $('#viewseg').classList.toggle('hide', S.tab !== 'deals' || !!S.focus);
+  $('#storesel').classList.toggle('hide', S.tab !== 'deals');
   $('#viewseg').querySelectorAll('button').forEach(b => b.classList.toggle('on', (S.view || 'stores') === b.dataset.view));
   const cartN = (S.cart || []).reduce((n, x) => n + x.qty, 0), cartT = (S.cart || []).reduce((n, x) => n + x.qty * x.price, 0);
   $('#cartpill').textContent = cartN ? `🛒 Cart · ${cartN} item${cartN > 1 ? 's' : ''} · ${money(cartT)}` : '🛒 Cart is empty';
   $('#tabs').innerHTML = TABS.map(([k, i, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}"><span>${i}</span>${n}${k === 'cart' && cartN ? `<span class="n">${cartN}</span>` : ''}</button>`).join('');
   $('#cats').innerHTML = ['all', ...CATS].map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-cat="${c}">${CAT_LABEL[c]}</button>`).join('');
   build(); banner();
+  { const seen = new Map(); for (const d of DISPS) { const k = storeKey(d); if (!seen.has(k) || d.dist < seen.get(k).dist) seen.set(k, d); }
+    if (S.focus && !seen.has(S.focus)) S.focus = '';
+    $('#storesel').innerHTML = `<option value="">All stores (${seen.size})</option>` + [...seen.entries()].sort((a, b) => a[1].dist - b[1].dist).map(([k, d]) => `<option value="${esc(k)}" ${S.focus === k ? 'selected' : ''}>${esc(d.name)} · ${d.dist.toFixed(1)} mi</option>`).join(''); }
   const v = visibleDeals(), sale = v.filter(x => x.p.score > 0).length, items = v.filter(x => x.p.item).length;
   const read = DISPS.filter(d => d.checked).length, withSite = DISPS.filter(d => d.website).length;
   toast(S.center ? `${DISPS.length} stores within ${S.radius} miles of ${S.center.label} · prices read for ${read} · ${sale} sale items and deals` : '');
@@ -742,8 +775,7 @@ function renderSaved() {
 }
 
 function renderSettings() {
-  const stores = [...new Map(DISPS.map(d => [storeKey(d), d.name.replace(/\s*[-–].*$/, '')])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  for (const k of S.shopped || []) if (!stores.some(([x]) => x === k)) stores.push([k, k]);
+  const stores = DISPS.slice().sort((a, b) => a.dist - b.dist).map(d => [d.id, `${d.name.replace(/\s*[-–].*$/, '')} · ${d.city || (d.address || '').split(' ').slice(-2, -1)[0] || ''} · ${d.dist.toFixed(1)} mi`]);
   const used = Object.entries(S.used || {});
   $('#settings').innerHTML = `
   <div class="card"><b>General</b>
@@ -763,7 +795,7 @@ function renderSettings() {
     ${(S.watch || []).map((w, i) => `<div class="row" style="justify-content:space-between"><span>👁 ${esc(w.q)}${w.max ? ` · under ${money(w.max)}` : ' · any sale'}</span><button data-delwatch="${i}">Remove</button></div>`).join('') || '<div class="meta">Nothing yet — hit “👁 Watch” on any product, or add one below.</div>'}
     <div class="row"><input id="wq" placeholder="Product, strain or brand (e.g. Blue Dream, Roll One cart)" style="flex:1"><input id="wmax" type="number" placeholder="max $ (optional)" style="width:130px"><button id="wadd2">Add</button></div></div>
   <div class="card"><b>Stores I've shopped at</b> <span class="meta">— first-time-customer deals are hidden for these</span>
-    <div style="columns:2;margin-top:6px">${stores.map(([k, n]) => `<label style="display:block"><input type="checkbox" data-shop="${esc(k)}" ${(S.shopped || []).includes(k) ? 'checked' : ''}> ${esc(n)}</label>`).join('') || '<span class="meta">Search an area first.</span>'}</div></div>
+    <div style="columns:2;margin-top:6px">${stores.map(([k, n]) => `<label style="display:flex;margin:4px 0"><input type="checkbox" data-shop="${esc(k)}" ${(S.shopped || []).includes(k) ? 'checked' : ''}> ${esc(n)}</label>`).join('') || '<span class="meta">Search an area first.</span>'}</div></div>
   <div class="card"><b>Used deals</b> <span class="meta">— hidden everywhere</span>
     ${used.length ? used.map(([k, v]) => `<div class="row" style="justify-content:space-between"><span class="meta">${esc(v.store)}: ${esc(v.label)}</span><button data-restore="${esc(k)}">Restore</button></div>`).join('') : '<div class="meta">None yet — hit “✓ Used” on any deal.</div>'}</div>
   <div class="card"><b>Never show</b> <span class="meta">— brands, words or stores, one per line</span>
@@ -807,6 +839,7 @@ let qst; $('#qs').oninput = e => { clearTimeout(qst); qst = setTimeout(() => { Q
 let tts; $('#q').addEventListener('input', e => { clearTimeout(tts); const v = e.target.value.trim(); if (/^\d{5}$/.test(v)) tts = setTimeout(search, 500); });
 $('#go').onclick = search;
 $('#cartpill').onclick = () => { S.tab = 'cart'; render(); window.scrollTo(0, 0); };
+$('#storesel').onchange = e => { S.focus = e.target.value; if (S.focus) S.view = 'stores'; render(); window.scrollTo(0, 0); };
 $('#viewseg').onclick = e => { const b = e.target.closest('[data-view]'); if (b) { S.view = b.dataset.view; render(); } };
 $('#sharetop').onclick = shareTop;
 $('#listgo').onclick = () => { S.shopList = $('#shoplist').value; render(); }; $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
