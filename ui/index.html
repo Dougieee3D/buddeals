@@ -250,7 +250,19 @@ function primaryCat(x) {
   if (x.mgThc && !x.grams) return 'edible';
   return 'other';
 }
+// Size in grams from a product name: ".5g" = 0.5 (not 5), "1/8" = 3.5, "1g", "28 g", "oz".
+function gramsOf(name) {
+  const t = String(name || '');
+  let m = t.match(/(?<![\d.])(\d*\.\d+|\d+)\s*(g|gram|grams)\b/i);
+  if (m) { const g = parseFloat(m[1]); return g > 0 && g <= 56 ? g : null; }
+  if (/\b1\/8\b|eighth/i.test(t)) return 3.5;
+  if (/\b1\/4\b|quarter/i.test(t)) return 7;
+  if (/\b1\/2\s*oz|half\s*(oz|ounce)/i.test(t)) return 14;
+  if (/\b(1\s*)?(oz|ounce)\b/i.test(t)) return 28;
+  return null;
+}
 function productDeal(x) {
+  { const g = gramsOf(x.name); if (g) x = { ...x, grams: g, mgThc: x.thc && x.thc < 100 ? Math.round(g * 10 * x.thc) : x.mgThc }; }
   const pct = x.was && !x.inflated ? 1 - x.price / x.was : 0, ppg = x.grams ? x.price / x.grams : null;
   const p100 = x.mgThc ? x.price / x.mgThc * 100 : null;
   return { text: x.name, cats: [primaryCat(x)], days: null, groups: [], newOnly: false, expired: false, threshold: 0, kind: 'item', item: true,
@@ -520,7 +532,7 @@ function renderPlan() {
     const rewards = d.wallet.reduce((s, w) => s + (w.dollars || 0) + (w.points || 0) * (w.ppv || 0), 0);
     const deals = d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && !(p.newOnly && shopped(d)) && !S.used?.[usedKey(d, p)] && catOk(p, S.cat) && !hidden(d, p));
     const cand = (d.products || []).filter(x => catOk({ item: true, cats: [primaryCat(x)] }, S.cat) && fOk(productDeal(x)) && !hidden(d, { text: x.name, brand: x.brand }) && !S.used?.[usedKey(d, { text: x.name })])
-      .map(x => ({ ...x, pct: x.was ? 1 - x.price / x.was : 0, ppg: x.grams ? x.price / x.grams : null }))
+      .map(x => { const g = gramsOf(x.name) || x.grams; return { ...x, grams: g, pct: x.was ? 1 - x.price / x.was : 0, ppg: g ? x.price / g : null }; })
       .sort((a, b) => (b.pct >= 0.01) - (a.pct >= 0.01) || b.pct - a.pct || (a.ppg ?? 1e9) - (b.ppg ?? 1e9) || a.price - b.price);
     const cart = [], names = new Set(); let spent = 0;
     for (const x of cand) {
@@ -741,7 +753,7 @@ async function shareTop() {
 }
 function matchLine(line, p) {
   const words = line.toLowerCase().replace(/\b(of|a|an|the|some|any|pack|please)\b/g, ' ').split(/\s+/).filter(Boolean);
-  const want = catsOf(line), g = (line.match(/(\d+(\.\d+)?)\s*g\b/i) || [])[1] ? +line.match(/(\d+(\.\d+)?)\s*g\b/i)[1] : /eighth|1\/8/i.test(line) ? 3.5 : /quarter|1\/4/i.test(line) ? 7 : /half/i.test(line) ? 14 : /ounce|\boz\b/i.test(line) ? 28 : null;
+  const want = catsOf(line), g = gramsOf(line) ? gramsOf(line) : /eighth|1\/8/i.test(line) ? 3.5 : /quarter|1\/4/i.test(line) ? 7 : /half/i.test(line) ? 14 : /ounce|\boz\b/i.test(line) ? 28 : null;
   if (!want.includes('all') && !want.some(c => p.cats.includes(c))) return false;
   if (g && p.grams && Math.abs(p.grams - g) > 0.6) return false;
   const hay = `${p.text} ${p.brand || ''} ${p.type || ''}`.toLowerCase();

@@ -46,7 +46,7 @@ CHAIN_SITES = [
     (r"zen leaf", "https://zenleafdispensaries.com"), (r"cannabist", "https://www.gocannabist.com"), (r"\binsa\b", "https://insa.com"),
     (r"jungle boys", "https://jungleboysflorida.com"), (r"flowery", "https://theflowery.co"),
 ]
-GRAM_RX = [(r"(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b", None), (r"\b1/8\b|eighth", 3.5), (r"\b1/4\b|quarter", 7.0),
+GRAM_RX = [(r"(?<![\d.])(\d*\.\d+|\d+)\s*(?:g|gram|grams)\b", None), (r"\b1/8\b|eighth", 3.5), (r"\b1/4\b|quarter", 7.0),
            (r"\b1/2\s*oz|half\s*(?:oz|ounce)", 14.0), (r"\b(?:1\s*)?(?:oz|ounce)\b", 28.0)]
 
 
