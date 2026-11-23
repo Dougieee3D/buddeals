@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.8.1"
+APP_VERSION = "2.9.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -267,11 +267,11 @@ class Api:
         cancel = threading.Event()
         if not only_host:
             self._cancel = cancel
-        def progress(done, total):
-            if cancel.is_set():
+        def progress(done, total, stage=""):
+            if cancel.is_set() or only_host:
                 return
             try:
-                main.evaluate_js(f"window.onScanProgress && window.onScanProgress({done},{total})")
+                main.evaluate_js(f"window.onScanProgress && window.onScanProgress({done},{total},{json.dumps(stage)})")
             except Exception:
                 pass
         def on_site(disps):

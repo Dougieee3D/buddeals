@@ -832,6 +832,8 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     stopped = lambda: bool(cancel and cancel.is_set())
     with _lock:
         cache = _load()
+    if progress:
+        progress(0, 0, "stores")
     disps, area, note = _area_disps(lat, lon, miles, cache, False, reader)
     for d in disps:
         d["_dist"] = miles_between(lat, lon, d["lat"], d["lon"])
@@ -840,6 +842,8 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     if on_site and disps:
         on_site(_out(disps, cache))  # stores show up right away, before websites are looked up
     need = [d for d in disps if not d.get("website") and not recipe_for(d["name"])]
+    if need and progress:
+        progress(0, len(need), "websites")
     if need:  # find each store's own website so we read the real site
         with cf.ThreadPoolExecutor(max_workers=8) as pool:
             for d, url in zip(need, pool.map(lambda d: find_website(d, area, cache, None), need)):

@@ -23,6 +23,11 @@ a{color:var(--acc);font-weight:600}
 .tab:hover{background:var(--panel2)}.tab.on{background:var(--accbg);color:var(--acc)}.tab .n{margin-left:auto;background:var(--acc);color:var(--ink);border-radius:99px;font-size:12px;padding:1px 8px}
 .side .foot{margin-top:auto;font-size:12px;color:var(--dim);padding:0 8px}
 .mainwrap{min-width:0;display:flex;flex-direction:column}
+#pbar{display:flex;align-items:center;gap:12px}#pbar[hidden]{display:none}
+#pbar .ptrack{flex:1;height:14px;border-radius:7px;background:var(--line);overflow:hidden}
+#pbar .pfill{height:100%;width:0;border-radius:7px;background:var(--accent,#2e7d32);transition:width .4s ease}
+#pbar.done .pfill{background:#2e7d32}#pbar.stopped .pfill{background:#9e9e9e}
+#pbar .ptext{font-size:16px;font-weight:600;white-space:nowrap;min-width:260px;text-align:right}
 header.top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;flex-direction:column;gap:10px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input,select,button,textarea{font:inherit;color:var(--txt);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:44px}
@@ -117,6 +122,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
     <div id="fpanel" class="fpanel hide"></div>
     <div class="chips" id="saved"></div>
   </div>
+  <div id="pbar" hidden role="progressbar" aria-label="Search progress"><div class="ptrack"><div class="pfill"></div></div><span class="ptext"></span></div>
 </header>
 <main>
   <div id="update"></div>
@@ -635,7 +641,15 @@ function render() {
 }
 
 let scanning = false, scanGen = 0, QS = '', rt2;
-const setStop = on => { const b = $('#stop'); if (b) b.hidden = !on; };
+const setStop = on => { const b = $('#stop'); if (b) b.hidden = !on; if (on) bar(2, 'Starting search…'); };
+let barT, t0 = 0;
+function bar(pct, text, state = '') {   // the loading bar under the search box
+  const el = $('#pbar'); if (!el) return; clearTimeout(barT);
+  el.hidden = false; el.className = state; el.setAttribute('aria-valuenow', Math.round(pct));
+  el.querySelector('.pfill').style.width = Math.max(2, Math.min(100, pct)) + '%';
+  el.querySelector('.ptext').textContent = text;
+  if (state) barT = setTimeout(() => { el.hidden = true; }, state === 'done' ? 8000 : 4000);
+}
 const nearCenter = d => !S.center || d.lat == null || Math.hypot(d.lat - S.center.lat, (d.lon - S.center.lon) * Math.cos(S.center.lat * Math.PI / 180)) * 69 <= S.radius + 15;
 const mergeLive = list => { const m = new Map(LIVE.map(d => [d.id, d])); for (const d of list) m.set(d.id, d); LIVE = [...m.values()]; };
 window.onSiteResult = list => { if (!scanning) return; list = list.filter(nearCenter); if (!list.length) return; mergeLive(list); clearTimeout(rt2); rt2 = setTimeout(render, 250); };
@@ -651,6 +665,7 @@ async function locate(center, force = false) {
     toast(`Showing saved results — reading ${S.agree ? '' : '(age-gated menus skipped) '}menus near ${center.label} for live prices…`);
     const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8, !!S.leaflyBackup);
     if (gen !== scanGen || r.cancelled) return;
+    bar(100, `✓ Done — ${(r.dispensaries || []).length} stores checked`, 'done');
     LIVE = r.dispensaries || LIVE; DATA.updated = r.updated;
     $('#updated').textContent = r.updated ? `Prices checked ${ago(r.updated)}` : '';
     scanning = false; render(); runAlerts(); stockCheck();
@@ -665,7 +680,16 @@ async function rereadStore(host) {
   const r = await api().scan(S.center.lat, S.center.lon, S.radius, true, !!S.agree, host, 1, !!S.leaflyBackup);
   mergeLive((r.dispensaries || []).filter(d => d.host === host)); render(); toast('Store menu refreshed.');
 }
-window.onScanProgress = (done, total) => { if (total) toast(`Reading menus… ${done}/${total} stores done — results fill in as each one finishes`); };
+window.onScanProgress = (done, total, stage) => {
+  if (!scanning) return;
+  if (stage === 'stores') return bar(4, 'Step 1 of 3: finding stores near you…');
+  if (stage === 'websites') return bar(8, `Step 2 of 3: finding ${total} store websites…`);
+  if (!total) return;
+  if (!done) t0 = Date.now();
+  let left = '';
+  if (done && done < total) { const s = (Date.now() - t0) / done * (total - done) / 1000; left = s < 60 ? ' · under a minute left' : ` · about ${Math.round(s / 60)} min left`; }
+  bar(10 + 90 * done / total, `Step 3 of 3: ${done} of ${total} stores checked (${Math.round(100 * done / total)}%)${left}`);
+};
 setInterval(() => { if (S.bgRefresh !== false && S.center && !scanning) locate(S.center, false); }, 30 * 60 * 1000);
 
 function addWatch(q, max) {
@@ -907,7 +931,7 @@ document.addEventListener('click', e => {
 let qst; $('#qs').oninput = e => { clearTimeout(qst); qst = setTimeout(() => { QS = e.target.value.trim().toLowerCase(); render(); }, 150); };
 let tts; $('#q').addEventListener('input', e => { clearTimeout(tts); const v = e.target.value.trim(); if (/^\d{5}$/.test(v)) tts = setTimeout(search, 500); });
 $('#go').onclick = search;
-$('#stop').onclick = () => { scanGen++; api().stop_scan(); scanning = false; setStop(false); render(); toast('Search stopped. Type a new ZIP code or address any time.'); };
+$('#stop').onclick = () => { scanGen++; api().stop_scan(); scanning = false; setStop(false); bar(100, 'Search stopped', 'stopped'); render(); toast('Search stopped. Type a new ZIP code or address any time.'); };
 $('#cartpill').onclick = () => { S.tab = 'cart'; render(); window.scrollTo(0, 0); };
 $('#ftoggle').onclick = () => { S.fopen = !S.fopen; render(); };
 $('#fpanel').addEventListener('click', e => {
