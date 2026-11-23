@@ -767,7 +767,7 @@ function renderSettings() {
     <textarea id="hidewords" placeholder="e.g.&#10;shake&#10;Some Brand">${esc((S.hide || []).join('\n'))}</textarea></div>
   <div class="card"><b>Saved places</b>
     ${(S.places || []).map((x, i) => `<div class="row" style="justify-content:space-between"><span>📍 ${esc(x.name)} · ${x.radius} mi</span><button data-delplace="${i}">Remove</button></div>`).join('') || '<div class="meta">Search somewhere, then click “＋ Save this place”.</div>'}</div>
-  <div class="card"><b>Data</b><div class="acts"><button id="clearcache">Clear saved menus (re-read everything)</button><button id="aexp2">Back up my settings</button></div>
+  <div class="card"><b>Data</b><div class="acts"><button id="chkupd">Check for updates now</button><button id="clearcache">Clear saved menus (re-read everything)</button><button id="aexp2">Back up my settings</button></div>
     <div class="meta" style="margin-top:6px">Everything is stored only on this PC. BudDeals v<span class="vv"></span></div></div>`;
   api().version().then(v => $('#settings .vv').textContent = v);
   const el = $('#settings');
@@ -780,6 +780,7 @@ function renderSettings() {
   el.querySelectorAll('[data-delwatch]').forEach(b => b.onclick = () => { S.watch = (S.watch || []).filter((_, i) => i !== +b.dataset.delwatch); render(); });
   $('#wadd2').onclick = () => { const q = $('#wq').value.trim(); if (q) addWatch(q, +$('#wmax').value || null); };
   $('#hidewords').onchange = e => { S.hide = e.target.value.split('\n').map(x => x.trim()).filter(Boolean); save(); };
+  $('#chkupd').onclick = async () => { toast('Checking for updates…'); S.updTried = null; save(); const u = await api().check_update(); if (!u) return toast('You have the newest version.'); checkUpdate(); };
   $('#clearcache').onclick = async () => { await api().clear_cache(); toast('Saved menus cleared.'); if (S.center) locate(S.center, true); };
   $('#aexp2').onclick = () => $('#aexp').click();
 }
@@ -877,6 +878,7 @@ $('#updated').textContent = 'Your deal finder';
 api().version().then(v => { $('#ver').textContent = 'Version ' + v; });
 checkUpdate();
 api().set_tray(S.tray !== false);
+setInterval(checkUpdate, 3 * 60 * 60 * 1000);
 render();
 if (S.q && !S.center) search(); else if (S.center) locate(S.center);
 </script>
