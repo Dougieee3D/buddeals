@@ -420,35 +420,84 @@ def _open_text(s):
     return ""
 
 
+def _leafly_page(state, city, page, reader):
+    url = f"https://www.leafly.com/dispensaries/{slug(state)}/{slug(city)}" + (f"?page={page}" if page > 1 else "")
+    j = next_data(url, reader)
+    data = ((((j or {}).get("props") or {}).get("pageProps") or {}).get("storeLocatorResults") or {}).get("data") or {}
+    return [x for v in data.values() if isinstance(v, list) for x in v if isinstance(x, dict) and x.get("slug")]
+
+
 def leafly_stores(lat, lon, miles, area, reader=None):
+    """Every storefront dispensary within `miles`, from Leafly's city listing (any state).
+    The listing is sorted by 'Recommended', not distance, so read pages in batches and only stop once a whole
+    batch adds nothing within range."""
     state, city = area.get("state"), area.get("city")
     if not state or not city:
         return []
-    out = {}
-    for page in range(1, 8):
-        url = f"https://www.leafly.com/dispensaries/{slug(state)}/{slug(city)}" + (f"?page={page}" if page > 1 else "")
-        j = next_data(url, reader)
-        data = ((((j or {}).get("props") or {}).get("pageProps") or {}).get("storeLocatorResults") or {}).get("data") or {}
-        stores = [x for v in data.values() if isinstance(v, list) for x in v if isinstance(x, dict) and x.get("slug")]
-        if not stores:
-            break
-        far = 0
-        for x in stores:
-            a = x.get("address") or {}
-            if a.get("lat") is None:
-                continue
-            if miles_between(lat, lon, a["lat"], a["lon"]) > miles:
-                far += 1
-                continue
-            out[x["slug"]] = {
-                "id": "leafly/" + x["slug"], "name": x.get("name") or "Dispensary", "lat": a["lat"], "lon": a["lon"],
-                "address": " ".join(v for v in [a.get("address1"), a.get("city"), a.get("state")] if v), "city": a.get("city") or "",
-                "phone": x.get("phone") or "", "hours": _open_text(x), "leafly": x["slug"], "hasMenu": bool(x.get("hasMenuItems")),
-                "website": "", "tag": x.get("mainTag") or "",
-            }
-        if far >= len(stores) * 0.8:
-            break
+    out, page = {}, 1
+    with cf.ThreadPoolExecutor(max_workers=4) as pool:
+        while page <= 16:
+            batch = list(range(page, page + 4))
+            results = list(pool.map(lambda pg: _leafly_page(state, city, pg, reader), batch))
+            page += 4
+            added = seen_any = 0
+            for stores in results:
+                seen_any += len(stores)
+                for x in stores:
+                    a = x.get("address") or {}
+                    if a.get("lat") is None or miles_between(lat, lon, a["lat"], a["lon"]) > miles:
+                        continue
+                    marks = x.get("mapMarkers") or []
+                    if marks and all((m.get("locationType") or "storefront") != "storefront" for m in marks):
+                        continue  # delivery-only service, nowhere to walk in
+                    if x["slug"] not in out:
+                        added += 1
+                    out[x["slug"]] = {
+                        "id": "leafly/" + x["slug"], "name": x.get("name") or "Dispensary", "lat": a["lat"], "lon": a["lon"],
+                        "address": " ".join(v for v in [a.get("address1"), a.get("city"), a.get("state")] if v), "city": a.get("city") or "",
+                        "phone": x.get("phone") or "", "hours": _open_text(x), "leafly": x["slug"], "hasMenu": bool(x.get("hasMenuItems")),
+                        "website": "", "tag": x.get("mainTag") or "",
+                    }
+            if not seen_any or (added == 0 and page > 5):
+                break
     return list(out.values())
+
+
+def osm_cannabis(lat, lon, miles):
+    """Licensed cannabis shops on OpenStreetMap within range (a second source for stores Leafly doesn't list)."""
+    r = round(miles * 1609.34)
+    q = f'[out:json][timeout:40];(nwr["shop"="cannabis"](around:{r},{lat},{lon});nwr["healthcare"="dispensary"]["name"](around:{r},{lat},{lon}););out center tags;'
+    body = urllib.parse.urlencode({"data": q}).encode()
+    for ep in OVERPASS:
+        try:
+            els = json.loads(_get(ep, data=body, timeout=45, ua=APP_UA, limit=20_000_000,
+                                  headers={"Content-Type": "application/x-www-form-urlencoded"})[2]).get("elements", [])
+            out = []
+            for e in els:
+                d = _to_disp(e)
+                if d["lat"] is None or not (e.get("tags") or {}).get("name"):
+                    continue
+                if re.search(r"\b(cbd|hemp|kratom|smoke|vape shop|tobacco|delta)\b", d["name"], re.I):
+                    continue  # not a licensed dispensary
+                d["id"] = "osm/" + d["id"]
+                out.append(d)
+            return out
+        except Exception:
+            continue
+    return []
+
+
+def _merge_stores(primary, extra):
+    """Add stores from `extra` that aren't already in `primary` (same place = within ~0.15 mi or same name nearby)."""
+    out = list(primary)
+    for d in extra:
+        n = norm_name = re.sub(r"[^a-z0-9]", "", d["name"].lower())[:8]
+        dup = any(miles_between(d["lat"], d["lon"], p["lat"], p["lon"]) < 0.15 or
+                  (miles_between(d["lat"], d["lon"], p["lat"], p["lon"]) < 1.0 and re.sub(r"[^a-z0-9]", "", p["name"].lower())[:8] == n)
+                  for p in out)
+        if not dup:
+            out.append(d)
+    return out
 
 
 LEAFLY_CATS = {"flower": "flower", "pre-roll": "preroll", "preroll": "preroll", "cartridge": "vape", "vape": "vape", "vaporizer": "vape",
@@ -577,16 +626,17 @@ def _out(disps, cache):
 
 
 def _area_disps(lat, lon, miles, cache, force, reader=None):
-    key = f"L{lat:.2f},{lon:.2f},{int(miles)}"
+    key = f"L2:{lat:.2f},{lon:.2f},{int(miles)}"
     hit = cache["areas"].get(key)
     if hit and not force and time.time() - hit["t"] < 24 * 3600:
         return hit["d"], hit.get("area", {}), None
     area = area_of(lat, lon)
-    disps = leafly_stores(lat, lon, miles, area, reader)
-    note = None
-    if not disps:  # Leafly unreachable or no city match: fall back to the map, cannabis shops only
-        osm, note = dispensaries(lat, lon, miles, cache, False)
-        disps = [d for d in osm if re.search(r"cannabis|dispensar|marijuana|" + "|".join(r["rx"] for r in RECIPES), d["name"], re.I)]
+    with cf.ThreadPoolExecutor(max_workers=2) as pool:
+        f1 = pool.submit(leafly_stores, lat, lon, miles, area, reader)
+        f2 = pool.submit(osm_cannabis, lat, lon, miles)
+        leafly, osm = f1.result(), f2.result()
+    disps = _merge_stores(leafly, osm)
+    note = None if disps else None
     if disps:
         cache["areas"][key] = {"t": time.time(), "d": disps, "area": area}
     elif hit:
@@ -600,7 +650,7 @@ def cached(lat, lon, miles):
     """Instant: whatever was read before for this area (no browsing)."""
     with _lock:
         cache = _load()
-    key = f"L{lat:.2f},{lon:.2f},{int(miles)}"
+    key = f"L2:{lat:.2f},{lon:.2f},{int(miles)}"
     hit = cache["areas"].get(key)
     return {"dispensaries": _out(hit["d"], cache) if hit else [], "updated": None, "error": None}
 
