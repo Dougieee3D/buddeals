@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -56,6 +56,8 @@ LOAD_MORE_JS = r"""(()=>{const b=[...document.querySelectorAll('button,a,[role=b
 
 # Reads deal lines, product cards (price + crossed-out price) and menu/deal links from the rendered page.
 EXTRACT_JS = r"""(()=>{const T=s=>(s||'').replace(/\s+/g,' ').trim();
+const TERPS=['myrcene','limonene','caryophyllene','pinene','linalool','terpinolene','humulene','ocimene','bisabolol','nerolidol','guaiol','terpineol','valencene','farnesene','eucalyptol','camphene'];
+const XF=t=>({terp:((t.match(/TERP(?:S|ENES)?:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||t.match(/(\d{1,2}(\.\d+)?)\s*%\s*terp/i)||[])[1]||''),cbd:((t.match(/CBD:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||[])[1]||''),terps:TERPS.filter(x=>new RegExp('\\b'+x,'i').test(t))});
 const DEAL=/(\d{1,2}\s*%\s*off|\bbogo\b|b1g1|buy\s*(\d+|one)\s*,?\s*get|\$\s?\d+\s*off|spend\s*(over\s*)?\$\s?\d+|(?<![\/\d.])\d{1,2}\s*(for|\/)\s*\$\s?\d+)/i;
 const lines=[...new Set((document.body.innerText||'').split(/\n+/).map(T).filter(s=>s.length>=6&&s.length<=240&&DEAL.test(s)&&!/^\d{1,2}\s*%\s*off\s*\$?[\d.]*$/i.test(s)))].slice(0,40);
 const P=/^\$\s?\d{1,4}(\.\d{1,2})?$/;
@@ -69,7 +71,7 @@ for(const leaf of [...document.querySelectorAll('body *')].filter(isPrice).slice
  if(!vals.length)continue;const now=vals.filter(x=>!x.s).map(x=>x.v),was=vals.filter(x=>x.s).map(x=>x.v);
  const price=now.length?Math.min(...now):Math.min(...vals.map(x=>x.v));const wasP=was.length?Math.max(...was):null;
  const name=t.split(/\n+/).map(x=>T(x.replace(/\$\s?\d[\d,.]*/g,' '))).filter(s=>s.length>3&&s.length<140&&!/\$|add to (cart|bag)|^\d+\s*%|^(sale|new|qty|quantity|in stock|sold out)/i.test(s)).sort((a,b)=>b.length-a.length)[0]||'';
- if(!name)continue;const la=card.closest('a[href]')||card.querySelector('a[href]');items.push({url:la?la.href:'',left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:(t.split(/\n+/).map(T).find(x=>x.length>1&&x.length<30&&x!==name&&!/\$|%|thc|terp|^\d|indica|sativa|hybrid|sale|new|\|/i.test(x))||'')});if(items.length>=400)break}
+ if(!name)continue;const la=card.closest('a[href]')||card.querySelector('a[href]');items.push({...XF(t),url:la?la.href:'',left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,was:wasP&&wasP>price?wasP:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:(t.split(/\n+/).map(T).find(x=>x.length>1&&x.length<30&&x!==name&&!/\$|%|thc|terp|^\d|indica|sativa|hybrid|sale|new|\|/i.test(x))||'')});if(items.length>=400)break}
 
 const META=/^(sale|new|indica|sativa|hybrid|cbd|thc|terp|only \d+ left|view options|add to (cart|bag)|currently|formerly|was|now|regular|as low as:?|each|limited|in stock|sold out|staff pick|best seller|popular|featured|\d+(\.\d+)?\s?(g|mg|oz|ml)|\d+\s*%\s*off|\$[\d.,]+\s*off|save .*|\|)$/i;
 let grid=null,gn=0;for(const el of document.querySelectorAll('body *')){const k=el.children;if(k.length<4||k.length>600)continue;let n=0;for(const c of k){const t=c.innerText||'';if(t.length>12&&t.length<900&&/\$\s?\d/.test(t))n++}if(n>=4&&n/k.length>=0.5&&n>gn){grid=el;gn=n}}
@@ -87,7 +89,7 @@ if(grid)for(const c of grid.children){const L=(c.innerText||'').split(/\n+/).map
  const cand=L.filter(l=>l.length>2&&l.length<100&&l!==brandLine&&!META.test(l)&&!/\$|%|:\s|^\d/.test(l));
  const name=cand.sort((a,b)=>b.length-a.length)[0]||'';if(!name)continue;
 const pa=[...c.querySelectorAll('a[href]')].map(a=>a.href).find(h=>{try{const u=new URL(h);return u.hostname===location.hostname&&u.pathname.length>1&&h.split('#')[0]!==location.href&&!/cart|login|account|category\/?$|wishlist|\?page=/i.test(h)}catch(e){return false}})||'';
- const t=L.join('\n');items2.push({url:pa,left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,was:was&&was>price?was:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/THC:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:brand||(cand.length>1?cand.filter(x=>x!==name).sort((a,b)=>a.length-b.length)[0]:'')})}
+ const t=L.join('\n');items2.push({...XF(t),url:pa,left:((t.match(/only\s+(\d+)\s+left/i)||[])[1]||''),name,price,was:was&&was>price?was:null,tag:T((t.match(/\d{1,2}\s*%\s*off/i)||[''])[0]),size:T((t.match(/\b\d+(\.\d+)?\s?(g|oz)\b|\b1\/8\b|\b1\/4\b/i)||[''])[0]),thc:((t.match(/THC:?\s*(\d{1,2}(\.\d+)?)\s*%/i)||t.match(/(\d{1,2}(\.\d+)?)\s*%\s*(total\s*)?THC/i)||[])[1]||''),mg:((t.match(/(\d{2,4})\s*mg\b/i)||[])[1]||''),strain:((t.match(/\b(indica|sativa|hybrid)\b/i)||[])[1]||''),brand:brand||(cand.length>1?cand.filter(x=>x!==name).sort((a,b)=>a.length-b.length)[0]:'')})}
 const useItems=items2.length>=items.length?items2:items;
 const host=location.hostname;const links=[...document.querySelectorAll('a[href]')].map(a=>({h:a.href.split('#')[0],t:T(a.innerText).toLowerCase()})).filter(x=>{try{return new URL(x.h).hostname===host&&x.h!==location.href}catch(e){return false}});
 const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);

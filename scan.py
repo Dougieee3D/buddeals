@@ -282,10 +282,16 @@ def _product(x, src):
         mg = None
     grams = grams_of(name) or grams_of(str(x.get("size") or ""))
     mg_thc = mg or (grams * 10 * thc if grams and thc and thc < 100 else None)  # g * 1000 mg * thc%/100
+    def num(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    terps = [str(t).lower() for t in (x.get("terps") or []) if t][:6]
     url = str(x.get("url") or "")
     left = x.get("left")
     return {"name": name, "price": price, "was": was if was and was > price else None, "cats": cats, "grams": grams,
-            "url": url if url.startswith("http") else "", "left": int(left) if str(left or "").isdigit() else None,
+            "url": url if url.startswith("http") else "", "terp": num(x.get("terp")), "cbd": num(x.get("cbd")), "terps": terps, "left": int(left) if str(left or "").isdigit() else None,
             "thc": thc, "mgThc": round(mg_thc) if mg_thc else None, "brand": str(x.get("brand") or "")[:60],
             "type": str(x.get("strain") or "")[:20], "src": src}
 
@@ -461,8 +467,21 @@ def _leafly_item(x, src, store_slug=""):
     m = re.search(r"([\d.]+)\s*%", str(x.get("thcContentLabel") or ""))
     if m:
         thc = float(m.group(1))
+    cbd = None
+    m = re.search(r"([\d.]+)\s*%", str(x.get("cbdContentLabel") or ""))
+    if m:
+        cbd = float(m.group(1))
+    st = x.get("strain") if isinstance(x.get("strain"), dict) else {}
+    strain_type = str(st.get("category") or st.get("phenotype") or "")
+    tp = st.get("terps") or st.get("terpenes") or {}
+    if isinstance(tp, dict):
+        terps = [k for k, _ in sorted(tp.items(), key=lambda kv: -(kv[1].get("score", 0) if isinstance(kv[1], dict) else 0))][:3]
+    elif isinstance(tp, list):
+        terps = [str(t.get("name") if isinstance(t, dict) else t) for t in tp][:3]
+    else:
+        terps = []
     p = _product({"name": x.get("name"), "price": now or price, "was": price if now and now < (price or 0) else None,
-                  "brand": x.get("brandName") or "", "strain": "", "thc": thc,
+                  "brand": x.get("brandName") or "", "strain": strain_type, "thc": thc, "cbd": cbd, "terps": terps,
                   "size": x.get("normalizedQuantityLabel") or x.get("displayQuantity") or "",
                   "left": x.get("stockQuantity") if isinstance(x.get("stockQuantity"), int) and x.get("stockQuantity") < 20 else None,
                   "url": f"https://www.leafly.com/dispensary-info/{store_slug}/p/{x.get('menuItemId')}/{slug(x.get('name') or '')}?variant={x.get('id')}"
