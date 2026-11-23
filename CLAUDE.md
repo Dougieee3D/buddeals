@@ -5,7 +5,7 @@ Windows desktop app: Python 3.12 + pywebview (WebView2) window around `ui/index.
 - `app.py` `BrowserReader` (hidden WebView2 windows): `GATE_JS` answers state/age/terms/store screens (age+terms only if `S.agree`), `EXTRACT_JS` finds the product grid and reads Currently/Formerly/struck prices, `LOAD_MORE_JS` (ctx `more`), `next_data()` for Next.js page data.
 - `desktop.py` tray icon (pystray), Windows notifications, start-with-Windows (HKCU Run, `--tray` starts hidden), QR codes (qrcode). Closing the window hides to tray when `S.tray`.
 - `ui/index.html` UI (calls `window.pywebview.api`): cache-first `api.cached()` then live `api.scan()` with `window.onSiteResult` per store; Settings tab state lives in `S` (store.json). `ui/js/dealparse.mjs` deal parser/ranking.
-- UI tabs: Deals (grades A–D, compare, watch, used), Budget (best cart, stacking, QR), List (cheapest store / 2-store split + route), Spending (monthly + FL allotment log), Wallet, Stores (best days), Map, Add deal, Settings.
+- UI: left sidebar nav + top bar (location, radius, cart pill). Light theme default (`S.theme`). Tabs: Deals (store columns `S.view='stores'` or one list; product rows with Add to cart / View product (`p.url`)), My cart (`S.cart`, per-store totals, store-deal thresholds, ✓ I bought these → `S.orders`), Budget, Shopping list, My orders (liked/dislike/buy-again, `stockCheck()` back-in-stock alerts via `S.stock`), Stores, Map, Rewards, Spending, Add a deal, Settings.
 - Price history per product in cache.json `hist` (60 days) → `isLow`, `inflated`, `typical`.
 - `.github/workflows/build.yml` builds `BudDeals-Setup.exe` on push to main → GitHub Release (tag v<version>).
 - `installer.iss` per-user install to %LOCALAPPDATA%\Programs\BudDeals.
