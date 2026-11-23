@@ -16,7 +16,8 @@ OutputBaseFilename=BudDeals-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=yes
+CloseApplications=force
+RestartApplications=no
 UninstallDisplayIcon={app}\BudDeals.exe
 
 [Tasks]
@@ -31,3 +32,4 @@ Name: "{userdesktop}\BudDeals"; Filename: "{app}\BudDeals.exe"; Tasks: desktopic
 
 [Run]
 Filename: "{app}\BudDeals.exe"; Description: "Open BudDeals"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\BudDeals.exe"; Flags: nowait; Check: WizardSilent

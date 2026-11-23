@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -177,6 +177,15 @@ class BrowserReader:
                 w.destroy()
             except Exception:
                 pass
+
+
+def _ulog(msg):
+    try:
+        os.makedirs(scan.DATA_DIR, exist_ok=True)
+        with open(os.path.join(scan.DATA_DIR, "update.log"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except Exception:
+        pass
 
 
 def _vt(v):
@@ -355,34 +364,29 @@ class Api:
                 sums = urllib.request.urlopen(urllib.request.Request(r["sums"], headers={"User-Agent": scan.APP_UA}), timeout=30).read().decode()
                 want = sums.split()[0].lower()
                 if hashlib.sha256(data).hexdigest() != want:
+                    _ulog("checksum mismatch — not installing")
                     return {"error": "The download didn’t match its checksum, so it wasn’t installed."}
             with open(path, "wb") as f:
                 f.write(data)
-            exe = sys.executable if getattr(sys, "frozen", False) else ""
-            # A helper outside the app: wait for BudDeals to fully exit (force it after 20s), install silently, reopen.
-            ps1 = os.path.join(tempfile.gettempdir(), "BudDeals-update.ps1")
-            with open(ps1, "w", encoding="utf-8") as f:
-                f.write(
-                    "$ErrorActionPreference='SilentlyContinue'\n"
-                    "for($i=0;$i -lt 40;$i++){ if(-not (Get-Process -Name BudDeals)){break}; Start-Sleep -Milliseconds 500 }\n"
-                    "Get-Process -Name BudDeals | Stop-Process -Force; Start-Sleep -Seconds 1\n"
-                    f"Start-Process -FilePath '{path}' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOCANCEL' -Wait\n"
-                    + (f"Start-Process -FilePath '{exe}'\n" if exe else "")
-                )
-            flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS | NEW_PROCESS_GROUP | NO_WINDOW
-            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps1]
+            inst_log = os.path.join(scan.DATA_DIR, "installer.log")
+            args = [path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS",
+                    f"/LOG={inst_log}"]
+            flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP: the installer outlives the app
             try:
-                subprocess.Popen(cmd, creationflags=flags | 0x01000000, close_fds=True)  # + BREAKAWAY_FROM_JOB
+                proc = subprocess.Popen(args, creationflags=flags | 0x01000000, close_fds=True, cwd=tempfile.gettempdir())
             except OSError:
-                subprocess.Popen(cmd, creationflags=flags, close_fds=True)
+                proc = subprocess.Popen(args, creationflags=flags, close_fds=True, cwd=tempfile.gettempdir())
+            _ulog(f"started installer for {r['version']} (pid {proc.pid}); BudDeals is closing so it can be replaced")
 
             def _bye():
+                time.sleep(0.8)
                 self.quit_app()
-                time.sleep(1.5)
-                os._exit(0)  # make sure nothing (tray, hidden windows) keeps the old version running
+                time.sleep(1.0)
+                os._exit(0)  # nothing (tray, hidden windows) may keep the old version running
             threading.Thread(target=_bye, daemon=True).start()
             return {"ok": True}
         except Exception as e:
+            _ulog(f"update failed: {e!r}")
             return {"error": f"Update failed: {e}"}
 
 
@@ -427,4 +431,5 @@ main.events.closing += _closing
 
 if __name__ == "__main__":
     os.makedirs(scan.DATA_DIR, exist_ok=True)
+    _ulog(f"BudDeals {APP_VERSION} started ({sys.executable})")
     webview.start(lambda: tray and tray.start(), private_mode=False, storage_path=os.path.join(scan.DATA_DIR, "webview"))
