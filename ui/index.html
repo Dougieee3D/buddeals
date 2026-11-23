@@ -95,6 +95,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
   <div class="row">
     <input id="q" placeholder="Type your ZIP code or address" autocomplete="postal-code" aria-label="Your ZIP code or address">
     <button class="pri" id="go">Search</button>
+    <button id="stop" hidden title="Stop checking stores">■ Stop</button>
     <button id="geo" title="Use my location">📍 Find me</button>
     <div class="radius"><label for="radius">Within <b id="rv">25</b> miles</label><input id="radius" type="range" min="5" max="150" step="5" value="25"></div>
     <button id="refresh" title="Check every store again now">🔄 Refresh prices</button>
@@ -633,25 +634,29 @@ function render() {
   ({ deals: renderDeals, budget: renderPlan, wallet: renderWallet, places: renderPlaces, map: renderMap, add: renderManual, settings: renderSettings, list: renderList, spend: renderSpend, cart: renderCart, orders: renderOrders })[S.tab]();
 }
 
-let scanning = false, pending = null, QS = '', rt2;
+let scanning = false, scanGen = 0, QS = '', rt2;
+const setStop = on => { const b = $('#stop'); if (b) b.hidden = !on; };
+const nearCenter = d => !S.center || d.lat == null || Math.hypot(d.lat - S.center.lat, (d.lon - S.center.lon) * Math.cos(S.center.lat * Math.PI / 180)) * 69 <= S.radius + 15;
 const mergeLive = list => { const m = new Map(LIVE.map(d => [d.id, d])); for (const d of list) m.set(d.id, d); LIVE = [...m.values()]; };
-window.onSiteResult = list => { mergeLive(list); clearTimeout(rt2); rt2 = setTimeout(render, 250); };
+window.onSiteResult = list => { if (!scanning) return; list = list.filter(nearCenter); if (!list.length) return; mergeLive(list); clearTimeout(rt2); rt2 = setTimeout(render, 250); };
 async function locate(center, force = false) {
-  if (scanning) { pending = [center, force]; return; }
-  scanning = true;
-  S.center = center; save();
+  const gen = ++scanGen;              // a new search replaces whatever was running
+  if (scanning) api().stop_scan();
+  scanning = true; setStop(true);
+  S.center = center; S.focus = null; save();
   try {
     const c = await api().cached(center.lat, center.lon, S.radius);   // instant: last results for this area
+    if (gen !== scanGen) return;
     LIVE = c.dispensaries || []; render(); if (LIVE.length) stockCheck();
     toast(`Showing saved results — reading ${S.agree ? '' : '(age-gated menus skipped) '}menus near ${center.label} for live prices…`);
     const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8, !!S.leaflyBackup);
+    if (gen !== scanGen || r.cancelled) return;
     LIVE = r.dispensaries || LIVE; DATA.updated = r.updated;
     $('#updated').textContent = r.updated ? `Prices checked ${ago(r.updated)}` : '';
     scanning = false; render(); runAlerts(); stockCheck();
     if (r.error) toast(r.error);
   } finally {
-    scanning = false;
-    if (pending) { const [c, f] = pending; pending = null; locate(c, f); }
+    if (gen === scanGen) { scanning = false; setStop(false); }
   }
 }
 async function rereadStore(host) {
@@ -902,6 +907,7 @@ document.addEventListener('click', e => {
 let qst; $('#qs').oninput = e => { clearTimeout(qst); qst = setTimeout(() => { QS = e.target.value.trim().toLowerCase(); render(); }, 150); };
 let tts; $('#q').addEventListener('input', e => { clearTimeout(tts); const v = e.target.value.trim(); if (/^\d{5}$/.test(v)) tts = setTimeout(search, 500); });
 $('#go').onclick = search;
+$('#stop').onclick = () => { scanGen++; api().stop_scan(); scanning = false; setStop(false); render(); toast('Search stopped. Type a new ZIP code or address any time.'); };
 $('#cartpill').onclick = () => { S.tab = 'cart'; render(); window.scrollTo(0, 0); };
 $('#ftoggle').onclick = () => { S.fopen = !S.fopen; render(); };
 $('#fpanel').addEventListener('click', e => {

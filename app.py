@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.8.0"
+APP_VERSION = "2.8.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -105,6 +105,7 @@ class BrowserReader:
     def __init__(self, n=8):
         self.pool = queue.Queue()
         self.wins = []
+        self.stopped = False
         for i in range(n):
             ev = threading.Event()
             w = webview.create_window(f"BudDeals scanner {i + 1}", html="<html></html>", hidden=True, width=1280, height=900)
@@ -114,8 +115,12 @@ class BrowserReader:
 
     def __call__(self, url, ctx=None):
         ctx = ctx or {}
+        if self.stopped:
+            return {}
         w, ev = self.pool.get()
         try:
+            if self.stopped:
+                return {}
             ev.clear()
             w.load_url(url)
             ev.wait(25)
@@ -136,6 +141,8 @@ class BrowserReader:
                 ev.wait(25)
                 self._settle(w)
             for _ in range(int(ctx.get("more", 6))):
+                if self.stopped:
+                    return {}
                 if not w.evaluate_js(LOAD_MORE_JS):
                     time.sleep(0.8)
                     if not w.evaluate_js(LOAD_MORE_JS):
@@ -176,6 +183,7 @@ class BrowserReader:
             time.sleep(0.6)
 
     def close(self):
+        self.stopped = True
         for w in self.wins:
             try:
                 w.destroy()
@@ -243,13 +251,32 @@ class Api:
         except Exception as e:
             return {"dispensaries": [], "updated": None, "error": f"{e}"}
 
+    def stop_scan(self):
+        """Stop the search that is running (a new search calls this first)."""
+        ev = getattr(self, "_cancel", None)
+        if ev:
+            ev.set()
+        r = getattr(self, "_reader", None)
+        if r:
+            r.stopped = True
+        return True
+
     def scan(self, lat, lon, miles, force=False, agree=False, only_host=None, workers=8, leafly=False):
+        if not only_host:
+            self.stop_scan()
+        cancel = threading.Event()
+        if not only_host:
+            self._cancel = cancel
         def progress(done, total):
+            if cancel.is_set():
+                return
             try:
                 main.evaluate_js(f"window.onScanProgress && window.onScanProgress({done},{total})")
             except Exception:
                 pass
         def on_site(disps):
+            if cancel.is_set():
+                return
             try:
                 main.evaluate_js(f"window.onSiteResult && window.onSiteResult({json.dumps(disps)})")
             except Exception:
@@ -259,9 +286,11 @@ class Api:
             reader = BrowserReader(1 if only_host else max(1, min(int(workers or 8), 12)))
         except Exception:
             reader = None
+        if not only_host:
+            self._reader = reader
         try:
             return scan.scan(float(lat), float(lon), float(miles), bool(force), progress, reader, bool(agree), on_site, only_host,
-                             int(workers or 8), bool(leafly))
+                             int(workers or 8), bool(leafly), cancel)
         except Exception as e:
             return {"dispensaries": [], "updated": None, "error": f"Scan failed: {e}"}
         finally:

@@ -828,12 +828,17 @@ def cached(lat, lon, miles):
     return {"dispensaries": _out(hit["d"], cache) if hit else [], "updated": None, "error": None}
 
 
-def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, on_site=None, only_host=None, workers=8, use_leafly=False):
+def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, on_site=None, only_host=None, workers=8, use_leafly=False, cancel=None):
+    stopped = lambda: bool(cancel and cancel.is_set())
     with _lock:
         cache = _load()
     disps, area, note = _area_disps(lat, lon, miles, cache, False, reader)
     for d in disps:
         d["_dist"] = miles_between(lat, lon, d["lat"], d["lon"])
+    if stopped():
+        return {"dispensaries": [], "updated": None, "cancelled": True}
+    if on_site and disps:
+        on_site(_out(disps, cache))  # stores show up right away, before websites are looked up
     need = [d for d in disps if not d.get("website") and not recipe_for(d["name"])]
     if need:  # find each store's own website so we read the real site
         with cf.ThreadPoolExecutor(max_workers=8) as pool:
@@ -852,6 +857,8 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     ctx = {**area, "agree": agree}
 
     def work(k):
+        if stopped():
+            return False, {"t": time.time(), "deals": [], "products": []}
         rc, st = jobs[k]
         if rc:
             ok, data = read_recipe(rc, st, reader, ctx)
@@ -894,14 +901,22 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
         return ok, data
 
     done = 0
-    if on_site and disps:
-        on_site(_out(disps, cache))  # stores show up right away; menus fill in as each one is read
     if progress:
         progress(0, len(todo))
-    with cf.ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo) or 1))) as pool:
-        futs = {pool.submit(work, k): k for k in todo}
-        for f in cf.as_completed(futs):
+    pool = cf.ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo) or 1)))
+    futs = {pool.submit(work, k): k for k in todo}
+    finished = []
+    try:
+        def finished_futures():  # like as_completed, but notices Stop within half a second
+            left = set(futs)
+            while left and not stopped():
+                fin, left = cf.wait(left, timeout=0.5, return_when=cf.FIRST_COMPLETED)
+                yield from fin
+        for f in finished_futures():
+            if stopped():
+                break
             k = futs[f]
+            finished.append(k)
             try:
                 ok, data = f.result()
             except Exception:
@@ -918,12 +933,24 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
                 on_site(_out([d for d in disps if _source(d)[0] == k], cache))
             if progress:
                 progress(done, len(todo))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    if stopped():  # keep the stores already read, then hand control back right away
+        with _lock:
+            c2 = _load()
+            c2.setdefault("web", {}).update(cache.get("web", {}))
+            c2.setdefault("plat", {}).update(cache.get("plat", {}))
+            c2["areas"].update(cache["areas"])
+            c2["sites"].update({k: cache["sites"][k] for k in finished if k in cache["sites"]})
+            c2.setdefault("hist", {}).update(cache.get("hist", {}))
+            _save(c2)
+        return {"dispensaries": [], "updated": None, "cancelled": True}
     with _lock:
         c2 = _load()
         c2.setdefault("web", {}).update(cache.get("web", {}))
         c2.setdefault("plat", {}).update(cache.get("plat", {}))
         c2["areas"].update(cache["areas"])
-        c2["sites"].update({k: cache["sites"][k] for k in todo if k in cache["sites"]})
+        c2["sites"].update({k: cache["sites"][k] for k in finished if k in cache["sites"]})
         c2.setdefault("hist", {}).update(cache.get("hist", {}))
         _save(c2)
     return {"dispensaries": _out(disps, cache), "updated": datetime.now(timezone.utc).isoformat(), "error": note, "sitesRead": len(jobs)}
