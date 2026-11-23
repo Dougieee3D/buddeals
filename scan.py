@@ -341,7 +341,7 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
             pass
     if reader and not products and not (known_pages and ok):
         tried = set(seen)
-        for path in ("/menu", "/shop", "/order-online", "/products", "/order", "/menus", "/store"):
+        for path in ("/menu", "/shop", "/order-online"):
             if time.time() > t_end:
                 break
             u = urllib.parse.urljoin(base, path)
@@ -695,6 +695,70 @@ def search_website(name, city, state):
     return ""
 
 
+def _search_links(query):
+    """Result links from a web search (DuckDuckGo, then Bing)."""
+    q = urllib.parse.quote(query)
+    links = []
+    try:
+        page = _get(f"https://html.duckduckgo.com/html/?q={q}", timeout=12)[2].decode("utf-8", "replace")
+        links = [urllib.parse.unquote(m.group(1)) for m in re.finditer(r'uddg=([^&"]+)', page)]
+    except Exception:
+        pass
+    if not links:
+        try:
+            page = _get(f"https://www.bing.com/search?q={q}", timeout=12)[2].decode("utf-8", "replace")
+            links = re.findall(r'<a[^>]+href="(https?://[^"]+)"', page)
+        except Exception:
+            pass
+    return links
+
+
+DUTCHIE_CATS = ("flower", "pre-rolls", "vaporizers", "concentrates", "edibles", "tinctures", "topicals")
+
+
+def ordering_menu(store, area, cache):
+    """Where the store actually sells online — its Dutchie, Jane or Weedmaps ordering store (cached 7 days).
+    Returns a list of menu pages to read, best first."""
+    plat = cache.setdefault("plat", {})
+    key = store.get("leafly") or store["id"]
+    hit = plat.get(key)
+    if hit and time.time() - hit["t"] < 7 * 86400:
+        return hit["pages"]
+    name = re.sub(r"\s*[-–(].*$", "", store["name"]).strip()
+    city = store.get("city") or area.get("city", "")
+    words = [w for w in re.findall(r"[a-z]{3,}", name.lower()) if w not in ("dispensary", "cannabis", "the", "and", "company")]
+    def fits(slug):
+        return not words or any(w[:5] in slug.lower() for w in words)
+    pages = []
+    for q, rx in ((f"{name} {city} dutchie", r"https?://(?:www\.)?dutchie\.com/(stores|dispensary|embedded-menu)/([a-z0-9-]+)"),
+                  (f"{name} {city} iheartjane", r"https?://(?:www\.)?iheartjane\.com/(?:embed/)?stores/(\d+)/([a-z0-9-]+)"),
+                  (f"{name} {city} weedmaps menu", r"https?://(?:www\.)?weedmaps\.com/dispensaries/([a-z0-9-]+)")):
+        for link in _search_links(q)[:12]:
+            m = re.search(rx, link, re.I)
+            if not m:
+                continue
+            if "dutchie" in rx and fits(m.group(2)):
+                base = f"https://dutchie.com/{'stores' if m.group(1) != 'dispensary' else 'dispensary'}/{m.group(2)}"
+                pages = [base + "/specials"] + [f"{base}/products/{c}" for c in DUTCHIE_CATS]
+            elif "iheartjane" in rx and fits(m.group(2)):
+                pages = [f"https://www.iheartjane.com/stores/{m.group(1)}/{m.group(2)}/menu"]
+            elif "weedmaps" in rx and fits(m.group(1)):
+                pages = [f"https://weedmaps.com/dispensaries/{m.group(1)}"]
+            if pages:
+                break
+        if pages:
+            break
+    plat[key] = {"t": time.time(), "pages": pages}
+    return pages
+
+
+def read_menu_pages(pages, reader, ctx, label):
+    rc = {"key": "menu", "pages": lambda st: pages, "follow": None, "more": 8}
+    ok, data = read_recipe(rc, {"city": ctx.get("city", "")}, reader, ctx)
+    data["from"] = label
+    return ok, data
+
+
 def find_website(store, area, cache, reader=None):
     """Store's own site: chain list → its Leafly page → web search. Cached 30 days."""
     web = cache.setdefault("web", {})
@@ -800,8 +864,13 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
                     return ok2, d2
             return ok, data
         if k.startswith("leafly:"):
+            pages = ordering_menu(st, area, cache) if reader else []
+            if pages:
+                ok, data = read_menu_pages(pages, reader, {**ctx, "city": st.get("city") or ""}, f"{st['name'].split(' - ')[0]} online ordering menu")
+                if data["products"]:
+                    return ok, data
             if not use_leafly:
-                return True, {"t": time.time(), "deals": [], "products": [], "from": "couldn't find this store's website"}
+                return True, {"t": time.time(), "deals": [], "products": [], "from": "couldn't find this store's website or online menu"}
             if not st.get("hasMenu"):
                 return True, {"t": time.time(), "deals": [], "products": [], "from": "no online menu"}
             ok, data = leafly_menu(st["leafly"], reader)
@@ -809,6 +878,13 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
             return ok, data
         ok, data = read_site(st.get("website"), reader, {**ctx, "city": st.get("city") or ctx.get("city", ""), "more": 4})
         data["from"] = "store website"
+        if not data["products"] and reader:  # the website doesn't show the menu itself: read the store's online ordering menu
+            pages = ordering_menu(st, area, cache)
+            if pages:
+                ok2, d2 = read_menu_pages(pages, reader, {**ctx, "city": st.get("city") or ""}, f"{st['name'].split(' - ')[0]} online ordering menu")
+                if d2["products"]:
+                    d2["deals"] = data["deals"] + d2["deals"]
+                    return ok2, d2
         if use_leafly and not data["products"] and st.get("leafly") and st.get("hasMenu"):
             ok2, d2 = leafly_menu(st["leafly"], reader)
             if d2["products"]:
@@ -845,6 +921,7 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     with _lock:
         c2 = _load()
         c2.setdefault("web", {}).update(cache.get("web", {}))
+        c2.setdefault("plat", {}).update(cache.get("plat", {}))
         c2["areas"].update(cache["areas"])
         c2["sites"].update({k: cache["sites"][k] for k in todo if k in cache["sites"]})
         c2.setdefault("hist", {}).update(cache.get("hist", {}))

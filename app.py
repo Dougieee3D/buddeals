@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.8.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
