@@ -119,3 +119,62 @@ export function parseRewards(text) {
   }
   return { points, dollars, offers: [...new Set(offers)].slice(0, 12) };
 }
+
+// ---------- cart pricing: stack a store's deals the way its register would ----------
+// items: [{price, was, qty, cat}]  deals: parsed store deals (already filtered to today / eligible)
+// Item deals (category % off, BOGO, buy X get Y, N for $T) go on items not already on sale, unless the deal says it stacks.
+// Then the best order deal (spend $X get Y% / $Z off) on the eligible subtotal. "Cannot be combined" deals are tried both ways.
+const NOCOMBO = /(not|cannot|can'?t|can not)\s+be\s+combined|no stacking|not stackable|excludes?\s+(sale|discounted)|exclusions apply/i;
+const STACKS = /stack|on top of|additional|extra \d|in addition/i;
+export function priceCart(items, deals) {
+  const units = [];
+  items.forEach((x, i) => { for (let n = 0; n < (x.qty || 1); n++) units.push({ i, price: +x.price || 0, reg: +(x.was || x.price) || 0, sale: !!x.was, cat: x.cat || 'other' }); });
+  const sub = units.reduce((s, u) => s + u.price, 0), reg = units.reduce((s, u) => s + u.reg, 0);
+  const itemDeals = deals.filter(d => ['pct', 'bogo', 'bxgy', 'bundle'].includes(d.kind) && !(d.kind === 'pct' && d.upTo && d.cats.includes('all')));
+  const orderDeals = deals.filter(d => d.kind === 'tier' || d.kind === 'tier$');
+  const fits = (d, u) => matchesCat(d, u.cat) && (!u.sale || STACKS.test(d.text));
+  // savings one item deal gives on the units it covers (each unit used once)
+  function itemPass(pool) {
+    const used = new Set(), lines = [];
+    const options = itemDeals.map(d => {
+      const us = pool.filter(u => fits(d, u)).sort((a, b) => b.price - a.price);
+      let save = 0;
+      if (d.kind === 'pct') save = us.reduce((s, u) => s + u.price * d.pct, 0);
+      else if (d.kind === 'bogo') { for (let k = 1; k < us.length; k += 2) save += us[k].price * (d.half ? 0.5 : 1); }
+      else if (d.kind === 'bxgy') { const [x, y, f] = d.qty; for (let k = 0; k + x + y <= us.length; k += x + y) for (let j = k + x; j < k + x + y; j++) save += us[j].price * f; }
+      else if (d.kind === 'bundle') { for (let k = 0; k + d.qty <= us.length; k += d.qty) { const g = us.slice(k, k + d.qty).reduce((s, u) => s + u.price, 0); if (g > d.total) save += g - d.total; } }
+      return { d, us, save };
+    }).filter(o => o.save > 0.005).sort((a, b) => b.save - a.save);
+    let save = 0;
+    for (const o of options) {  // best deal first; a unit only gets one item deal
+      if (o.us.some(u => used.has(u))) continue;
+      o.us.forEach(u => used.add(u)); save += o.save; lines.push({ label: o.d.label || o.d.text, save: o.save, text: o.d.text });
+    }
+    return { save, lines };
+  }
+  function orderPass(pool, skipNoCombo) {
+    let best = null, hint = null;
+    for (const d of orderDeals) {
+      if (skipNoCombo && NOCOMBO.test(d.text)) continue;
+      const elig = pool.filter(u => matchesCat(d, u.cat));
+      const spend = elig.reduce((s, u) => s + (u.now ?? u.price), 0);
+      if (spend + 1e-9 >= d.threshold) {
+        const save = d.kind === 'tier' ? spend * d.pct : Math.min(d.dollarsOff, spend);
+        if (!best || save > best.save) best = { label: d.label || d.text, save, text: d.text };
+      } else if (!hint || d.threshold - spend < hint.need) hint = { need: d.threshold - spend, label: d.label || d.text, cats: d.cats };
+    }
+    return { best, hint };
+  }
+  // A: item deals, then order deal on what's left to pay (skipping order deals that refuse to combine when items got a deal)
+  const A = itemPass(units);
+  const scale = sub ? (sub - A.save) / sub : 1;  // order deals count what you pay after item deals
+  const oA = orderPass(units.map(u => ({ ...u, now: u.price * scale })), A.save > 0);
+  const saveA = A.save + (oA.best ? oA.best.save : 0);
+  // B: only the order deal, on full menu prices (for "cannot be combined" deals)
+  const oB = orderPass(units, false);
+  const saveB = oB.best ? oB.best.save : 0;
+  const useB = saveB > saveA + 0.005;
+  const lines = useB ? [oB.best] : [...A.lines, ...(oA.best ? [oA.best] : [])];
+  const save = useB ? saveB : saveA;
+  return { sub, reg, save, total: Math.max(0, sub - save), lines, hint: (useB ? oB : oA).hint, alone: useB };
+}

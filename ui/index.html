@@ -189,7 +189,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
 </div>
 
 <script type="module">
-import { CATS, CAT_LABEL, parseDeal, parseRewards, appliesToday, matchesCat, retailFor, catsOf } from './js/dealparse.mjs';
+import { CATS, CAT_LABEL, priceCart, parseDeal, parseRewards, appliesToday, matchesCat, retailFor, catsOf } from './js/dealparse.mjs';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -427,14 +427,15 @@ let ENTRIES = [];
 function addToCart(d, p) {
   const k = storeKey(d), id = k + '|' + norm(p.text) + '|' + p.price;
   const c = [...(S.cart || [])], hit = c.find(x => x.id === id);
-  if (hit) hit.qty++; else c.push({ id, storeKey: k, store: d.name, storeId: d.id, name: p.text, brand: p.brand || '', price: p.price, was: p.was || null, url: p.url || p.src || '', grams: p.grams || null, qty: 1 });
+  if (hit) hit.qty++; else c.push({ id, storeKey: k, store: d.name, storeId: d.id, name: p.text, brand: p.brand || '', price: p.price, was: p.was || null, url: p.url || p.src || '', grams: p.grams || null, cat: (p.cats || [])[0] || null, qty: 1 });
   S.cart = c; render();
   const t = c.filter(x => x.storeKey === k).reduce((s, x) => s + x.qty * x.price, 0);
   toast(`Added “${p.text}”. Your ${d.name} cart is now ${money(t)}.`);
 }
 function storeDeals(k) {
   const d = DISPS.find(x => storeKey(x) === k);
-  return d ? d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && (p.kind === 'tier' || p.kind === 'tier$' || p.kind === 'pct')) : [];
+  return d ? d.parsed.filter(p => !p.item && !p.expired && appliesToday(p) && ['tier', 'tier$', 'pct', 'bogo', 'bxgy', 'bundle'].includes(p.kind)
+    && !(p.groups || []).length && !(p.newOnly && shopped(d)) && !S.used?.[usedKey(d, p)]) : [];
 }
 function renderCart() {
   const c = S.cart || [];
@@ -443,12 +444,13 @@ function renderCart() {
   const tax = +S.tax || 0; let grand = 0, grandSave = 0;
   const cards = [...by.entries()].map(([k, items]) => {
     const sub = items.reduce((s, x) => s + x.qty * x.price, 0), reg = items.reduce((s, x) => s + x.qty * (x.was || x.price), 0);
-    let dealLine = '', after = sub;
-    for (const p of storeDeals(k)) {
-      if (p.kind === 'tier' && sub >= p.threshold) { const v = sub * (1 - p.pct); if (v < after) { after = v; dealLine = `✅ <b>${esc(p.label)}</b> applies — ask for it at the counter.`; } }
-      else if (p.kind === 'tier$' && sub >= p.threshold) { const v = sub - p.dollarsOff; if (v < after) { after = v; dealLine = `✅ <b>${esc(p.label)}</b> applies — ask for it at the counter.`; } }
-      else if ((p.kind === 'tier' || p.kind === 'tier$') && !dealLine) dealLine = `💡 Add <b>${money(p.threshold - sub)}</b> more to get <b>${esc(p.label)}</b>.`;
-    }
+    // stack the store's deals like its register would (category % off, BOGO, N for $X, then spend $X get Y% off)
+    const pc = priceCart(items.map(x => ({ ...x, cat: x.cat || primaryCat({ name: x.name, cats: [], src: x.url || '' }) })), storeDeals(k));
+    const after = pc.total;
+    const dl = s => s.length > 70 ? s.slice(0, 67) + '…' : s;
+    let dealLine = pc.lines.map(l => `✅ <b>${esc(dl(l.text || l.label))}</b> — saves ${money(l.save)}`).join('<br>');
+    if (pc.lines.length) dealLine += `<div class="meta">${pc.alone ? 'This deal can’t be combined, so BudDeals used the one that saves you the most. ' : ''}Mention the deal at the counter if it isn’t applied automatically.</div>`;
+    if (pc.hint) dealLine += `${dealLine ? '<br>' : ''}💡 Add <b>${money(pc.hint.need)}</b> more${pc.hint.cats && !pc.hint.cats.includes('all') ? ' of ' + pc.hint.cats.map(c => (CAT_LABEL[c] || c).toLowerCase()).join('/') : ''} to get <b>${esc(pc.hint.label)}</b>.`;
     const total = after * (1 + tax / 100); grand += total; grandSave += reg - after;
     return `<div class="card"><h3 style="margin:0 0 6px">${esc(items[0].store)}</h3>
       <table>${items.map(x => `<tr><td><b>${esc(x.name)}</b>${x.brand ? `<div class="meta">${esc(x.brand)}</div>` : ''}${x.url ? `<a target="_blank" rel="noopener" href="${esc(x.url)}" style="font-size:14px">View product</a>` : ''}</td>
@@ -456,7 +458,7 @@ function renderCart() {
         <td style="text-align:right;white-space:nowrap"><b>${money(x.qty * x.price)}</b>${x.was ? `<br><s class="meta">${money(x.qty * x.was)}</s>` : ''}<br><button class="lnk" style="min-height:0;border:0;background:none;color:var(--bad);padding:2px 0;font-size:13px" data-rm="${esc(x.id)}">Remove</button></td></tr>`).join('')}</table>
       ${dealLine ? `<div class="banner" style="margin:10px 0 0">${dealLine}</div>` : ''}
       <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:17px"><span>Subtotal</span><b>${money(sub)}</b></div>
-      ${after < sub ? `<div style="display:flex;justify-content:space-between;color:var(--acc)"><span>With store deal</span><b>${money(after)}</b></div>` : ''}
+      ${after < sub ? `<div style="display:flex;justify-content:space-between;color:var(--acc)"><span>With store deals (−${money(sub - after)})</span><b>${money(after)}</b></div>` : ''}
       ${tax ? `<div style="display:flex;justify-content:space-between" class="meta"><span>Tax (${tax}%)</span><span>${money(after * tax / 100)}</span></div>` : ''}
       <div style="display:flex;justify-content:space-between;font-size:20px;margin-top:4px"><span>You pay about</span><b>${money(total)}</b></div>
       ${reg > after ? `<div class="meta" style="text-align:right">You save ${money(reg - after)} vs regular prices</div>` : ''}
