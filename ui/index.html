@@ -612,6 +612,7 @@ function ago(iso) { if (!iso) return ''; const m = (Date.now() - new Date(iso)) 
 function toast(t) { $('#status').textContent = t; }
 
 function banner() {
+  if (!S.v212) { S.v212 = 1; S.agree = true; S.leaflyBackup = true; S.workers = 0; save(); }   // 2.12: answer age/patient/terms screens, never blank, auto speed
   if (S.agree === undefined) {
     $('#banner').innerHTML = `<div class="banner">To read dispensary menus, BudDeals answers each site's “Are you 18+/21+ or a patient?” and “I agree to the site's terms” screens for you, the same as you'd click them yourself.
       <div class="acts"><button class="pri" id="agreeY">Allow — I'm of legal age / a patient</button><button id="agreeN">Not now</button></div></div>`;
@@ -674,7 +675,7 @@ async function locate(center, force = false) {
     if (gen !== scanGen) return;
     LIVE = c.dispensaries || []; render(); if (LIVE.length) stockCheck();
     toast(`Showing saved results — reading ${S.agree ? '' : '(age-gated menus skipped) '}menus near ${center.label} for live prices…`);
-    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 8, !!S.leaflyBackup);
+    const r = await api().scan(center.lat, center.lon, S.radius, force, !!S.agree, null, +S.workers || 0, S.leaflyBackup !== false);
     if (gen !== scanGen || r.cancelled) return;
     bar(100, `✓ Done — ${(r.dispensaries || []).length} stores checked`, 'done');
     LIVE = r.dispensaries || LIVE; DATA.updated = r.updated;
@@ -688,7 +689,7 @@ async function locate(center, force = false) {
 async function rereadStore(host) {
   if (!S.center) return;
   toast('Re-reading that store’s menu…');
-  const r = await api().scan(S.center.lat, S.center.lon, S.radius, true, !!S.agree, host, 1, !!S.leaflyBackup);
+  const r = await api().scan(S.center.lat, S.center.lon, S.radius, true, !!S.agree, host, 1, S.leaflyBackup !== false);
   mergeLive((r.dispensaries || []).filter(d => d.host === host)); render(); toast('Store menu refreshed.');
 }
 window.onScanProgress = (done, total, stage) => {
@@ -885,9 +886,9 @@ function renderSettings() {
     <div class="row" style="margin-top:6px"><label><input type="checkbox" data-set="autoUpdate" ${S.autoUpdate !== false ? 'checked' : ''}> Install updates automatically when I open BudDeals</label></div>
     <div class="row"><label><input type="checkbox" data-set="bgRefresh" ${S.bgRefresh !== false ? 'checked' : ''}> Re-read menus in the background every 30 minutes while open</label></div>
     <div class="row"><label>Look <select data-set="theme"><option value="light" ${S.theme !== 'dark' ? 'selected' : ''}>Light (easiest to read)</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Dark</option></select></label></div>
-    <div class="row"><label><input type="checkbox" data-set="leaflyBackup" ${S.leaflyBackup ? 'checked' : ''}> Use Leafly menus when a store’s own website can’t be read (off = store websites only)</label></div>
+    <div class="row"><label><input type="checkbox" data-set="leaflyBackup" ${S.leaflyBackup !== false ? 'checked' : ''}> When a store’s own website can’t be read, show its Leafly menu instead of nothing (marked “from Leafly”)</label></div>
     <div class="row"><label><input type="checkbox" data-set="agree" ${S.agree ? 'checked' : ''}> Answer dispensary “18+/21+ or patient” and “agree to terms” screens for me</label></div>
-    <div class="row"><label>Speed (menus read at once) <select data-set="workers">${[4, 8, 12].map(n => `<option ${+S.workers === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <div class="row"><label>Speed (menus read at once) <select data-set="workers">${[[0, 'Automatic (best for this PC)'], [4, '4'], [8, '8'], [12, '12'], [16, '16']].map(([n, l]) => `<option value="${n}" ${(+S.workers || 0) === n ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label>Text size <input type="range" min="80" max="140" step="5" value="${S.textSize || 100}" data-set="textSize"> <b>${S.textSize || 100}%</b></label></div>
     <div class="row"><label>Sales tax % <input type="number" step="0.5" value="${S.tax || 0}" data-set="tax" style="width:80px"></label><label>Gas $/mile <input type="number" step="0.01" value="${S.gas ?? 0.15}" data-set="gas" style="width:90px"></label></div>
   </div>

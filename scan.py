@@ -14,7 +14,7 @@ DATA_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "B
 CACHE_FILE = os.path.join(DATA_DIR, "cache.json")
 APP_UA = "BudDeals/1.0 (personal dispensary deal finder; Windows desktop app)"
 PAGE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 BudDeals/1.0"
-SITE_TTL = 15 * 60           # re-read a dispensary's menu if older than 15 minutes when you search
+SITE_TTL = 2 * 3600          # a normal search re-reads a menu older than 2 hours (Refresh prices re-reads everything)
 AREA_TTL = 7 * 24 * 3600     # dispensary list for an area is good for a week
 OVERPASS = [
     "https://overpass-api.de/api/interpreter",
@@ -270,6 +270,8 @@ def _product(x, src):
     if not was and m and 5 <= int(m.group(1)) < 90:
         was = round(price / (1 - int(m.group(1)) / 100), 2)
     cats = cats_of(name)
+    if cats == ["all"] and x.get("category"):
+        cats = cats_of(str(x.get("category")))
     if cats == ["all"]:
         cats = cats_of(urllib.parse.unquote(urllib.parse.urlparse(src).path).replace("-", " ").replace("/", " "))
     try:
@@ -297,6 +299,192 @@ def _product(x, src):
             "hi": num(x.get("hi")) if num(x.get("hi")) and num(x.get("hi")) > price else None}
 
 
+STATE_NAMES = dict(x.rsplit(" ", 1)[::-1] for x in (
+    "Alabama AL,Alaska AK,Arizona AZ,Arkansas AR,California CA,Colorado CO,Connecticut CT,Delaware DE,District of Columbia DC,"
+    "Florida FL,Georgia GA,Hawaii HI,Idaho ID,Illinois IL,Indiana IN,Iowa IA,Kansas KS,Kentucky KY,Louisiana LA,Maine ME,"
+    "Maryland MD,Massachusetts MA,Michigan MI,Minnesota MN,Mississippi MS,Missouri MO,Montana MT,Nebraska NE,Nevada NV,"
+    "New Hampshire NH,New Jersey NJ,New Mexico NM,New York NY,North Carolina NC,North Dakota ND,Ohio OH,Oklahoma OK,Oregon OR,"
+    "Pennsylvania PA,Rhode Island RI,South Carolina SC,South Dakota SD,Tennessee TN,Texas TX,Utah UT,Vermont VT,Virginia VA,"
+    "Washington WA,West Virginia WV,Wisconsin WI,Wyoming WY").split(","))
+# states where dispensaries only sell to medical patients: choose the medical menu there
+MED_ONLY = {"Florida", "Pennsylvania", "Texas", "Georgia", "Oklahoma", "Arkansas", "Utah", "Louisiana", "Mississippi", "Alabama",
+            "Hawaii", "New Hampshire", "West Virginia", "North Dakota", "South Dakota", "Kentucky", "Iowa", "Tennessee"}
+
+
+def state_name(st):
+    st = (st or "").strip()
+    return STATE_NAMES.get(st.upper(), st)
+
+
+# ---------- product data the menu itself loads (Dutchie, Jane, Shopify/Woo, Next.js…) ----------
+_JANE_SIZES = {"half_gram": "0.5g", "gram": "1g", "two_gram": "2g", "eighth_ounce": "3.5g", "eighth": "3.5g", "quarter_ounce": "7g",
+               "quarter": "7g", "half_ounce": "14g", "ounce": "28g", "each": ""}
+_NAME_KEYS = ("name", "productname", "product_name", "title", "displayname", "display_name")
+_PRODUCTISH = re.compile(r"brand|thc|cbd|strain|categor|kind|type|weight|option|variant|sku|potency|cannabinoid|offers|terpene|image|lineage", re.I)
+
+
+def _money(v):
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        m = re.fullmatch(r"\s*\$?\s*(\d{1,4}(?:\.\d{1,2})?)\s*", v)
+        return float(m.group(1)) if m else None
+    return None
+
+
+def _pct(v):
+    if isinstance(v, dict):
+        rng = v.get("range") or v.get("Range")
+        if isinstance(rng, list) and rng:
+            v = max([x for x in rng if isinstance(x, (int, float))] or [0])
+        else:
+            v = v.get("value") or v.get("max") or v.get("formatted")
+    if isinstance(v, list) and v:
+        v = max([x for x in v if isinstance(x, (int, float))] or [0])
+    if isinstance(v, str):
+        m = re.search(r"(\d{1,2}(?:\.\d+)?)\s*%", v) or re.fullmatch(r"\s*(\d{1,2}(?:\.\d+)?)\s*", v)
+        v = float(m.group(1)) if m else None
+    return float(v) if isinstance(v, (int, float)) and 0 < v < 100 else None
+
+
+def _json_item(o, page, med):
+    """One product node from a menu's JSON -> list of product dicts (one per size when sizes are listed)."""
+    low = {k.lower(): k for k in o}
+    name = next((o[low[k]] for k in _NAME_KEYS if k in low and isinstance(o[low[k]], str)), None)
+    if not name or not 1 < len(name.strip()) < 140 or not any(_PRODUCTISH.search(k) for k in o):
+        return []
+    brand = o.get(low.get("brand")) if "brand" in low else o.get(low.get("brandname") or low.get("brand_name") or "", "")
+    if isinstance(brand, dict):
+        brand = brand.get("name") or brand.get("Name") or ""
+    cat = next((o[low[k]] for k in ("category", "type", "kind", "producttype", "product_type", "root_subtype", "subcategory") if k in low and isinstance(o[low[k]], str)), "")
+    strain = next((o[low[k]] for k in ("straintype", "strain_type", "lineage", "category") if k in low and isinstance(o[low[k]], str) and o[low[k]].lower() in ("indica", "sativa", "hybrid", "cbd")), "")
+    thc = next((_pct(o[k]) for k in o if re.fullmatch(r"(percent_)?thc(content|_?percent(age)?|a?)?", k, re.I) and _pct(o[k])), None)
+    cbd = next((_pct(o[k]) for k in o if re.fullmatch(r"(percent_)?cbd(content|_?percent(age)?|a?)?", k, re.I) and _pct(o[k])), None)
+    terps = []
+    for k in o:
+        if re.search(r"terpene", k, re.I) and isinstance(o[k], list):
+            terps = [str(t.get("name") or t.get("Name") or "") if isinstance(t, dict) else str(t) for t in o[k]][:6]
+    url = next((o[low[k]] for k in ("url", "href", "permalink", "link", "product_url") if k in low and isinstance(o[low[k]], str)), "")
+    url = urllib.parse.urljoin(page, url) if url else ""
+    base = {"name": name.strip(), "brand": str(brand or "")[:60], "category": cat, "strain": strain, "thc": thc, "cbd": cbd,
+            "terps": [t for t in terps if t], "url": url}
+    out = []
+    # Jane: price_gram / discounted_price_gram … one per size
+    jane = {k[6:]: _money(v) for k, v in o.items() if k.startswith("price_") and _money(v)}
+    if jane:
+        for size, price in jane.items():
+            disc = _money(o.get("discounted_price_" + size) or o.get("special_price_" + size))
+            label = _JANE_SIZES.get(size, size.replace("_", " "))
+            nm = base["name"] + (f" {label}" if label and label.lower() not in base["name"].lower() else "")
+            out.append({**base, "name": nm, "price": disc if disc and disc < price else price, "was": price if disc and disc < price else None, "size": label})
+        return out
+    # Dutchie-style aligned arrays: Options ["1g","3.5g"], Prices / recPrices / medicalPrices, *SpecialPrices
+    arrays = {k: v for k, v in o.items() if isinstance(v, list) and v and all(_money(x) is not None for x in v) and re.search(r"price", k, re.I)}
+    opts = next((o[k] for k in o if re.fullmatch(r"options|weights|sizes", k, re.I) and isinstance(o[k], list) and o[k] and all(isinstance(x, str) for x in o[k])), None)
+    if arrays:
+        def pick(special):
+            ks = [k for k in arrays if bool(re.search(r"special|sale|discount", k, re.I)) == special]
+            pref = [k for k in ks if re.search(r"^med", k, re.I)] if med else [k for k in ks if re.search(r"^rec", k, re.I)]
+            ks = pref or [k for k in ks if not re.search(r"^(med|rec)", k, re.I)] or ([] if special else ks)
+            return arrays[ks[0]] if ks else None
+        reg, spec = pick(False), pick(True)
+        if reg:
+            for i, v in enumerate(reg):
+                price, sp = _money(v), _money(spec[i]) if spec and i < len(spec) else None
+                label = opts[i] if opts and i < len(opts) else ""
+                nm = base["name"] + (f" {label}" if label and label.lower() not in base["name"].lower() and label.upper() != "N/A" else "")
+                if price:
+                    out.append({**base, "name": nm, "price": sp if sp and sp < price else price, "was": price if sp and sp < price else None, "size": label})
+            return out
+    # variants / offers: [{price, option/title}]
+    for k in ("variants", "Variants", "offers", "options"):
+        vs = o.get(k)
+        if isinstance(vs, dict):
+            vs = [vs]
+        if isinstance(vs, list) and vs and isinstance(vs[0], dict):
+            for v in vs[:12]:
+                price = _money(v.get("price") or v.get("Price") or v.get("lowPrice"))
+                was = _money(v.get("compare_at_price") or v.get("compareAtPrice") or v.get("regular_price") or v.get("originalPrice"))
+                label = str(v.get("option") or v.get("title") or v.get("name") or v.get("weight") or "")
+                if label.lower() in ("default title", base["name"].lower()):
+                    label = ""
+                nm = base["name"] + (f" {label}" if label and label.lower() not in base["name"].lower() else "")
+                if price:
+                    out.append({**base, "name": nm, "price": price, "was": was if was and was > price else None, "size": label})
+            if out:
+                return out
+    # single price fields
+    prices = {k: _money(v) for k, v in o.items() if re.search(r"price", k, re.I) and _money(v)}
+    if prices:
+        regs = {k: v for k, v in prices.items() if not re.search(r"special|sale|discount|compare|original|regular|was|per|unit", k, re.I)}
+        sale = [v for k, v in prices.items() if re.search(r"special|sale|discount", k, re.I)]
+        was = [v for k, v in prices.items() if re.search(r"compare|original|regular|was", k, re.I)]
+        pref = {k: v for k, v in regs.items() if (k.lower().startswith("med") if med else k.lower().startswith("rec"))}
+        price = min((pref or regs or prices).values())
+        if sale and min(sale) < price:
+            price, was = min(sale), [price]
+        w = max(was) if was else None
+        out.append({**base, "price": price, "was": w if w and w > price else None,
+                    "size": str(o.get(low.get("weight", ""), "") or o.get(low.get("size", ""), "") or "")})
+    return out
+
+
+def json_products(texts, page, med=False):
+    """Products from the JSON a menu page loaded. Only lists of 3+ products (a real menu), or schema.org Product entries."""
+    found, seen = [], set()
+    def walk(node, depth=0):
+        if depth > 12:
+            return
+        if isinstance(node, list):
+            batch = []
+            for x in node[:2000]:
+                if isinstance(x, dict):
+                    batch += _json_item(x, page, med)
+            if len(batch) >= 3:
+                found.extend(batch)
+                return
+            for x in node[:2000]:
+                walk(x, depth + 1)
+        elif isinstance(node, dict):
+            if str(node.get("@type", "")).lower() == "product":
+                found.extend(_json_item(node, page, med))
+                return
+            for v in node.values():
+                if isinstance(v, (dict, list)):
+                    walk(v, depth + 1)
+    for t in texts or []:
+        try:
+            walk(json.loads(t))
+        except Exception:
+            continue
+    out = []
+    for x in found:
+        key = (x["name"].lower(), x["price"])
+        if key not in seen and 0.5 <= x["price"] <= 2000:
+            seen.add(key)
+            out.append(x)
+    return out
+
+
+def page_products(r, page, ctx=None):
+    """Products from one page read: the menu's own data when it has it (exact prices, sizes, THC), else the visible cards."""
+    prods = [p for p in (_product(x, page) for x in r.get("items") or []) if p]
+    jp = json_products(r.get("net"), page, (ctx or {}).get("state") in MED_ONLY)
+    if jp and len(jp) >= 0.6 * len(prods):
+        urls = {re.sub(r"\W+", "", p["name"].lower())[:24]: p["url"] for p in prods if p.get("url")}
+        out = []
+        for x in jp:
+            x["url"] = x.get("url") or urls.get(re.sub(r"\W+", "", x["name"].lower())[:24], "")
+            p = _product(x, page)
+            if p:
+                out.append(p)
+        if out:
+            return out
+    return prods
+
+
 def read_site(website, reader=None, ctx=None, known_pages=None):
     """reader(url, ctx) -> {url, lines, items, links} from a real (hidden) browser; falls back to a plain download.
     known_pages: pages that had products last time — read those directly instead of discovering again."""
@@ -320,7 +508,7 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
                 for e in (r.get("embeds") or [])[:2]:  # the menu lives in an embedded ordering system: read it directly
                     if e not in seen and e not in pages:
                         pages.insert(i, e)
-                prods = [p for p in (_product(x, final) for x in r.get("items") or []) if p]
+                prods = page_products(r, final, ctx)
                 ok = ok or bool(r.get("url"))
                 if r.get("dbg") and len(dbg) < 4:
                     dbg.append({"url": final, **r["dbg"]})
@@ -354,10 +542,10 @@ def read_site(website, reader=None, ctx=None, known_pages=None):
                 r = {}
             if r.get("dbg"):
                 dbg.append({"url": r.get("url") or u, **r["dbg"]})
-            prods = [p for p in (_product(x, r.get("url") or u) for x in r.get("items") or []) if p]
+            prods = page_products(r, r.get("url") or u, ctx)
             for e in (r.get("embeds") or [])[:2]:
                 rr = reader(e, ctx) or {}
-                prods += [p for p in (_product(x, rr.get("url") or e) for x in rr.get("items") or []) if p]
+                prods += page_products(rr, rr.get("url") or e, ctx)
                 deals += [{"text": t, "src": rr.get("url") or e} for t in rr.get("lines") or []]
                 if rr.get("dbg"):
                     dbg.append({"url": e, **rr["dbg"]})
@@ -634,7 +822,7 @@ def read_recipe(rc, store, reader, ctx):
             continue
         ok = True
         deals += [{"text": t, "src": r["url"]} for t in r.get("lines") or []]
-        products += [p for p in (_product(x, r["url"]) for x in r.get("items") or []) if p]
+        products += page_products(r, r["url"], ctx)
         if follow:
             pages += [l for l in (r.get("links") or []) + (r.get("allLinks") or []) if re.search(follow, l) and l not in seen][:10]
     uniq = list({d["text"].lower(): d for d in deals}.values())[:30]
@@ -866,7 +1054,7 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
             return False, {"t": time.time(), "deals": [], "products": []}
         rc, st = jobs[k]
         # "pick your state" screens: the store's own state (a Seekonk MA store when searching from RI), else the searched area's
-        ctx = {**base_ctx, "state": st.get("state") or base_ctx.get("state", "")}
+        ctx = {**base_ctx, "state": state_name(st.get("state") or base_ctx.get("state", ""))}
         if rc:
             ok, data = read_recipe(rc, st, reader, ctx)
             data["from"] = f"{re.sub(r'\s*[-–].*$', '', st['name'])} website ({st.get('city', '')} store)"

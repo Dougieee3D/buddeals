@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.11.0"
+APP_VERSION = "2.12.0"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -32,6 +32,19 @@ READ_REWARDS_JS = r"""(()=>{const L=document.body.innerText.split(/\n+/).map(s=>
 GATE_JS = r"""((STATE,ZIP,CITY,AGREE)=>{const T=s=>(s||'').replace(/\s+/g,' ').trim();const body=T(document.body.innerText).toLowerCase();
 const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};const click=e=>{try{e.click();return true}catch(x){return false}};
 const cl=()=>[...document.querySelectorAll('button,a,[role=button],[role=option],input[type=submit]')].filter(vis);let did=[];
+if(AGREE&&/birth|dob|born|date of birth|your age|enter your age|verify your age|mm\s*\/\s*dd/.test(body+' '+[...document.querySelectorAll('input,select')].map(e=>(e.name||'')+(e.id||'')+(e.placeholder||'')).join(' ').toLowerCase())){
+ const Y=String(new Date().getFullYear()-30);const setv=(e,v)=>{if(e.value===v)return false;const pr=Object.getOwnPropertyDescriptor(e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value');pr.set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));e.dispatchEvent(new Event('blur',{bubbles:true}));return true};
+ const opt=(e,ws)=>{const o=[...e.options].find(o=>ws.includes(T(o.value).toLowerCase())||ws.includes(T(o.text).toLowerCase()));return o?o.value:null};
+ for(const e of [...document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select')].filter(vis)){
+  const k=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.autocomplete||'')).toLowerCase();let v=null;
+  if(e.type==='date')v=Y+'-01-01';
+  else if(/month|\bmm\b|bday-month/.test(k))v=e.tagName==='SELECT'?opt(e,['1','01','january','jan']):'01';
+  else if(/\bday\b|\bdd\b|bday-day/.test(k))v=e.tagName==='SELECT'?opt(e,['1','01']):'01';
+  else if(/year|yyyy|\byy\b|bday-year/.test(k))v=e.tagName==='SELECT'?opt(e,[Y]):Y;
+  else if(/birth|dob|bday/.test(k))v='01/01/'+Y;
+  else if(/\bage\b/.test(k)&&e.type==='number')v='30';
+  if(v&&setv(e,v))did.push('dob')}
+ if(did.includes('dob')){const go=cl().find(x=>/^(enter|submit|continue|verify|confirm|go|enter site|yes|i am of age|next)$/.test(T(x.innerText||x.value).toLowerCase()));if(go&&click(go))did.push('dob-go')}}
 {const cb=cl();const dec=cb.find(b=>/^(reject|reject all|decline|deny|necessary only|only necessary|reject non-essential|decline all)$/.test(T(b.innerText).toLowerCase()));if(dec){click(dec)}else if(AGREE&&/cookie/.test(body)){const ok=cb.find(b=>/^(accept|accept all|accept cookies|ok|okay|got it|i understand|allow|allow all|close|dismiss|continue)$/.test(T(b.innerText||b.getAttribute('aria-label')).toLowerCase()));if(ok){click(ok);did.push('cookies')}}}
 const SL="Alabama AL,Alaska AK,Arizona AZ,Arkansas AR,California CA,Colorado CO,Connecticut CT,Delaware DE,District of Columbia DC,Florida FL,Georgia GA,Hawaii HI,Idaho ID,Illinois IL,Indiana IN,Iowa IA,Kansas KS,Kentucky KY,Louisiana LA,Maine ME,Maryland MD,Massachusetts MA,Michigan MI,Minnesota MN,Mississippi MS,Missouri MO,Montana MT,Nebraska NE,Nevada NV,New Hampshire NH,New Jersey NJ,New Mexico NM,New York NY,North Carolina NC,North Dakota ND,Ohio OH,Oklahoma OK,Oregon OR,Pennsylvania PA,Rhode Island RI,South Carolina SC,South Dakota SD,Tennessee TN,Texas TX,Utah UT,Vermont VT,Virginia VA,Washington WA,West Virginia WV,Wisconsin WI,Wyoming WY".split(',').map(x=>{const m=x.match(/^(.*) ([A-Z]{2})$/);return [m[1].toLowerCase(),m[2].toLowerCase()]});
 const SP=(()=>{const s=(STATE||'').toLowerCase().trim();return SL.find(p=>p[0]===s||p[1]===s)||(s?[s,s]:null)})();
@@ -44,7 +57,7 @@ if(SP&&(stSel.length||/(select|choose|pick|confirm|enter) (your |a |the )?state|
  else{const opt=[...document.querySelectorAll('[role=option],li,button,a,label,span,div,p,img')].filter(vis).find(e=>e.children.length<3&&(isSt(e.innerText||'')||isSt(e.getAttribute('alt')||'')||isSt(e.getAttribute('aria-label')||'')));
   if(opt){click(opt);did.push('state')}else{const cb=[...document.querySelectorAll('[role=combobox],[aria-haspopup],select')].filter(vis)[0];if(cb){click(cb);did.push('open-state')}}}}
 if(AGREE){for(const c of [...document.querySelectorAll('input[type=checkbox]')].filter(x=>!x.checked)){const l=T((c.labels&&c.labels[0]&&c.labels[0].innerText)||((c.closest('label')||c.parentElement||{}).innerText)||'').toLowerCase();if(/(18|21|age|agree|terms|patient)/.test(l)){click(c);did.push('check')}}}
-if(AGREE&&/(21|18|age verification|verify your age|patient|over the age|of legal age|are you (over|at least|a)|adult[- ]use|recreational|medical)/.test(body)){const MED=/florida/i.test(STATE);const choose=cl().find(b=>{const t=T(b.innerText||b.value).toLowerCase();return t.length<40&&(MED?/^(medical|med|shop medical|medical menu|i'?m a (medical )?patient|i am a (medical )?patient|patient)$/:/^(adult[- ]use|recreational|rec|shop (adult[- ]use|recreational)|adult[- ]use menu|recreational menu|21\+|adult use 21\+)$/).test(t)});if(choose){click(choose);did.push('menu-type')}else{for(const b of cl()){const t=T(b.innerText||b.value).toLowerCase();if(t.length<45&&/^(yes|enter|enter site|i am 21|i'm 21|i am 18|i'm 18|i am over|i'm over|i am of (legal )?age|i'm of (legal )?age|i am a (medical )?patient|i'm a (medical )?patient|i have a medical card|i agree|agree|confirm|continue|yes,? i|verify|i'?m 21\+|21\+|over 21)/.test(t)){click(b);did.push('age');break}}}}
+if(AGREE&&/(21|18|age verification|verify your age|patient|over the age|of legal age|are you (over|at least|a)|adult[- ]use|recreational|medical)/.test(body)){const MED=/^(florida|pennsylvania|texas|georgia|oklahoma|arkansas|utah|louisiana|mississippi|alabama|hawaii|new hampshire|west virginia|north dakota|south dakota|kentucky|iowa|tennessee|fl|pa|tx|ga|ok|ar|ut|la|ms|al|hi|nh|wv|nd|sd|ky|ia|tn)$/i.test(String(STATE).trim());const choose=cl().find(b=>{const t=T(b.innerText||b.value).toLowerCase();return t.length<40&&(MED?/^(medical|med|shop medical|medical menu|i'?m a (medical )?patient|i am a (medical )?patient|patient)$/:/^(adult[- ]use|recreational|rec|shop (adult[- ]use|recreational)|adult[- ]use menu|recreational menu|21\+|adult use 21\+)$/).test(t)});if(choose){click(choose);did.push('menu-type')}else{for(const b of cl()){const t=T(b.innerText||b.value).toLowerCase();if(t.length<45&&/^(yes|enter|enter site|i am 21|i'm 21|i am 18|i'm 18|i am over|i'm over|i am of (legal )?age|i'm of (legal )?age|i am a (medical )?patient|i'm a (medical )?patient|i have a medical card|i agree|agree|confirm|continue|yes,? i|verify|i'?m 21\+|21\+|over 21)/.test(t)){click(b);did.push('age');break}}}}
 if(/(select|choose|find|pick) (a |your )?(location|store|dispensary)|shop here|select (a )?store|set (as )?(my )?store/.test(body)){
  const re=/^(shop here|select store|select this store|select|choose|choose store|choose this store|set (as )?(my )?store|shop this (store|location)|start shopping|shop now|order here|make this my store)$/;
  const btns=cl().filter(b=>re.test(T(b.innerText).toLowerCase()));let pick=null;
@@ -101,7 +114,22 @@ const pick=re=>links.filter(x=>re.test(x.h+' '+x.t)).map(x=>x.h);
 const bad=/login|sign-?in|account|cart|checkout|blog|learn|news|career|about|contact|faq|privacy|terms|locat|dispensaries\/|wishlist|register/i;
 const embeds=[...document.querySelectorAll('iframe[src]')].map(f=>f.src).filter(u=>/dutchie|iheartjane|\bjane\b|sweed|weedmaps|tymber|blaze|meadow|dispenseapp|treez|flowhub|joint|alpine|grassdoor|leafbuyer|olla/i.test(u)&&!/leafly/i.test(u)).slice(0,3);
 const dbg=useItems.length?null:{title:document.title,text:T(document.body.innerText).slice(0,400),frames:[...document.querySelectorAll('iframe')].map(f=>f.src||'(no src)').slice(0,6),scripts:[...document.scripts].map(x=>x.src).filter(u=>/dutchie|jane|sweed|tymber|weedmaps|blaze|meadow|treez|flowhub|joint|alpine|olla|leafly/i.test(u)).slice(0,6),buttons:[...document.querySelectorAll('button,a[role=button]')].map(b=>T(b.innerText)).filter(Boolean).slice(0,15)};
-return JSON.stringify({url:location.href,dbg,embeds,lines,items:useItems,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products|tincture|topical|accessor|gear|cbd|beverage|drink|oral|capsule|gumm|chocolate|wellness|other/)])].filter(h=>!bad.test(h)).slice(0,16)})})()"""
+let netT=0;const net=[...(window.__bdNet||[]).map(x=>x.t),...[...document.querySelectorAll('script[type="application/ld+json"],script#__NEXT_DATA__,script[type="application/json"]')].map(x=>x.textContent||'').filter(t=>t.length>150&&/price/i.test(t))].filter(t=>(netT+=t.length)<8e6);
+return JSON.stringify({url:location.href,dbg,embeds,lines,items:useItems,net,allLinks:[...new Set(links.map(x=>x.h))].slice(0,300),links:[...new Set([...pick(/deal|special|promo|sale|discount/),...pick(/categor|flower|vape|vapor|concentrate|edible|pre-?roll|cartridge|shop|menu|products|tincture|topical|accessor|gear|cbd|beverage|drink|oral|capsule|gumm|chocolate|wellness|other/)])].filter(h=>!bad.test(h)).slice(0,16)})})()"""
+
+
+# Runs in every page (and embedded menu frame) before the site's own scripts: keeps a copy of the product data
+# the menu downloads for itself, so prices come straight from the store's data instead of being read off the screen.
+HOOK_JS = r"""(()=>{if(window.__bdHook)return;window.__bdHook=1;let top_=false;try{top_=window===window.top}catch(e){}
+window.__bdNet=window.__bdNet||[];let size=0;
+const keep=(u,t)=>{if(typeof t!=='string'||t.length<150||t.length>6e6)return;const c=t.trimStart()[0];if(c!=='{'&&c!=='[')return;if(!/price/i.test(t))return;
+ const rec={u:String(u||'').slice(0,300),t};if(top_){if(size<12e6){size+=t.length;window.__bdNet.push(rec)}}else{try{window.top.postMessage({__bd:rec},'*')}catch(e){}}};
+if(top_)window.addEventListener('message',e=>{try{if(e.data&&e.data.__bd&&size<12e6){size+=e.data.__bd.t.length;window.__bdNet.push(e.data.__bd)}}catch(x){}});
+const F=window.fetch;if(F)window.fetch=function(...a){return F.apply(this,a).then(r=>{try{const ct=(r.headers.get('content-type')||'');if(!/image|font|video|audio|css/.test(ct))r.clone().text().then(t=>keep(r.url||a[0],t)).catch(()=>{})}catch(e){}return r})};
+const O=XMLHttpRequest.prototype.open,S=XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.open=function(m,u){this.__u=u;return O.apply(this,arguments)};
+XMLHttpRequest.prototype.send=function(){this.addEventListener('load',()=>{try{if(!this.responseType||this.responseType==='text')keep(this.__u,this.responseText);else if(this.responseType==='json')keep(this.__u,JSON.stringify(this.response))}catch(e){}});return S.apply(this,arguments)};
+})();"""
 
 
 class BrowserReader:
@@ -111,6 +139,8 @@ class BrowserReader:
         self.pool = queue.Queue()
         self.wins = []
         self.stopped = False
+        self.prepped = set()
+        self._keep = []  # event handlers must stay referenced
         for i in range(n):
             ev = threading.Event()
             w = webview.create_window(f"BudDeals scanner {i + 1}", html="<html></html>", hidden=True, width=1280, height=900)
@@ -126,6 +156,9 @@ class BrowserReader:
         try:
             if self.stopped:
                 return {}
+            if id(w) not in self.prepped:
+                ev.wait(5)  # first blank page loaded = the browser engine is ready
+                self._prep(w)
             ev.clear()
             w.load_url(url)
             ev.wait(25)
@@ -158,6 +191,30 @@ class BrowserReader:
             return {}
         finally:
             self.pool.put((w, ev))
+
+    def _prep(self, w):
+        """Once per hidden window: copy menu data as it loads (HOOK_JS) and skip pictures/videos/fonts so pages load faster."""
+        self.prepped.add(id(w))
+        try:
+            from System import Action
+            from Microsoft.Web.WebView2.Core import CoreWebView2WebResourceContext as C
+            wv = w.native.browser.webview
+            skip = {int(C.Image), int(C.Media), int(C.Font)}
+            def setup():
+                core = wv.CoreWebView2
+                core.AddScriptToExecuteOnDocumentCreatedAsync(HOOK_JS)
+                def on_req(sender, a):
+                    try:
+                        if int(a.ResourceContext) in skip:
+                            a.Response = core.Environment.CreateWebResourceResponse(None, 404, "Skipped", "")
+                    except Exception:
+                        pass
+                core.WebResourceRequested += on_req
+                self._keep.append(on_req)
+            wv.Invoke(Action(setup))
+            _ulog("reader: data capture + fast loading on")
+        except Exception as e:
+            _ulog(f"reader: data capture unavailable ({e}); reading the page instead")
 
     def next_data(self, url):
         w, ev = self.pool.get()
@@ -288,7 +345,7 @@ class Api:
                 pass
         reader = None
         try:
-            reader = BrowserReader(1 if only_host else max(1, min(int(workers or 8), 12)))
+            reader = BrowserReader(1 if only_host else max(1, min(int(workers) if workers else max(6, min(12, (os.cpu_count() or 8) - 2)), 16)))
         except Exception:
             reader = None
         if not only_host:
