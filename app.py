@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.12.1"
+APP_VERSION = "2.12.2"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -30,7 +30,9 @@ READ_REWARDS_JS = r"""(()=>{const L=document.body.innerText.split(/\n+/).map(s=>
 # Gets past "pick your state", "are you 21 / a patient" and "pick your store" screens like a person would.
 # Cookie banners: only ever clicks a reject/decline option. Returns what it did ('' when nothing was in the way).
 GATE_JS = r"""((STATE,ZIP,CITY,AGREE)=>{const T=s=>(s||'').replace(/\s+/g,' ').trim();const body=T(document.body.innerText).toLowerCase();
-const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};const click=e=>{try{e.click();return true}catch(x){return false}};
+const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};const NOLOGIN=/sign ?in|log ?in|sign ?up|register|create (an )?account|my account|google|apple|facebook|microsoft|password|e-?mail|phone number|otp|verification code/i;
+const click=e=>{try{const t=(e.innerText||e.value||e.getAttribute('aria-label')||'')+' '+(e.getAttribute('href')||'');const box=e.closest('form,[role=dialog],dialog,.modal');
+ if(NOLOGIN.test(t)||(box&&box.querySelector('input[type=password],input[type=email],input[autocomplete*=email],input[autocomplete*=tel]')))return false;e.click();return true}catch(x){return false}};
 const cl=()=>[...document.querySelectorAll('button,a,[role=button],[role=option],input[type=submit]')].filter(vis);let did=[];
 if(AGREE&&/birth|dob|born|date of birth|your age|enter your age|verify your age|mm\s*\/\s*dd/.test(body+' '+[...document.querySelectorAll('input,select')].map(e=>(e.name||'')+(e.id||'')+(e.placeholder||'')).join(' ').toLowerCase())){
  const Y=String(new Date().getFullYear()-30);const setv=(e,v)=>{if(e.value===v)return false;const pr=Object.getOwnPropertyDescriptor(e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value');pr.set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));e.dispatchEvent(new Event('blur',{bubbles:true}));return true};
@@ -120,7 +122,7 @@ return JSON.stringify({url:location.href,dbg,embeds,lines,items:useItems,net,all
 
 # Runs in every page (and embedded menu frame) before the site's own scripts: keeps a copy of the product data
 # the menu downloads for itself, so prices come straight from the store's data instead of being read off the screen.
-HOOK_JS = r"""(()=>{if(window.__bdHook)return;window.__bdHook=1;let top_=false;try{top_=window===window.top}catch(e){}
+HOOK_JS = r"""(()=>{if(window.__bdHook)return;window.__bdHook=1;try{window.open=()=>null}catch(e){}let top_=false;try{top_=window===window.top}catch(e){}
 window.__bdNet=window.__bdNet||[];let size=0;
 const keep=(u,t)=>{if(typeof t!=='string'||t.length<150||t.length>6e6)return;const c=t.trimStart()[0];if(c!=='{'&&c!=='[')return;if(!/price/i.test(t))return;
  const rec={u:String(u||'').slice(0,300),t};if(top_){if(size<12e6){size+=t.length;window.__bdNet.push(rec)}}else{try{window.top.postMessage({__bd:rec},'*')}catch(e){}}};
@@ -210,7 +212,13 @@ class BrowserReader:
                     except Exception:
                         pass
                 core.WebResourceRequested += on_req
-                self._keep.append(on_req)
+                def on_popup(sender, a):  # never open sign-in or other pop-up windows from a price check
+                    try:
+                        a.Handled = True
+                    except Exception:
+                        pass
+                core.NewWindowRequested += on_popup
+                self._keep += [on_req, on_popup]
             wv.Invoke(Action(setup))
             _ulog("reader: data capture + fast loading on")
         except Exception as e:

@@ -144,7 +144,8 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
     <div class="grid" id="plan" style="margin-top:12px"></div>
   </section>
   <section id="t-wallet" class="hide">
-    <div class="card" style="margin-bottom:12px">
+    <div class="card" style="margin-bottom:12px"><b>🎁 Your rewards</b> — type your points or offers below (from your receipt or the store's app). BudDeals never signs in to any website; it only checks public prices.</div>
+    <div class="card" style="display:none">
       <b>🔒 Sign in to read your points &amp; personal deals.</b> You log in on the dispensary's own page inside BudDeals. The app never sees or saves your password, and your rewards stay on this PC.
       <div class="row" style="margin-top:8px"><input id="wsite" list="dsites" placeholder="Dispensary website, e.g. trulieve.com" style="flex:1;min-width:200px">
         <button class="pri" id="wopen">Open &amp; sign in</button><button id="wread">Read my rewards</button></div>
@@ -156,7 +157,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:6px}
       <div class="acts"><button id="wclear">Sign out of all dispensary sites</button></div>
     </div>
     <div class="form">
-      <label>Paste from "Grab my rewards" (or type offers, one per line)<textarea id="wpaste" placeholder="You have 1,240 points&#10;$12 in rewards available&#10;Happy Birthday! 30% off one order"></textarea></label>
+      <label>Type your points or offers, one per line<textarea id="wpaste" placeholder="You have 1,240 points&#10;$12 in rewards available&#10;Happy Birthday! 30% off one order"></textarea></label>
       <div class="row">
         <label>Store / chain name<input id="wstore" placeholder="e.g. Trulieve" list="dnames"></label>
         <label>$ per point<input id="wppv" type="number" step="0.001" value="0.01" style="width:90px"></label>
@@ -999,7 +1000,7 @@ $('#wadd').onclick = () => {
   old >= 0 ? (wallet[old] = entry) : wallet.unshift(entry);
   ls.set('wallet', wallet); $('#wpaste').value = ''; render();
 };
-$('#wopen').onclick = () => { const u = $('#wsite').value.trim(); if (!u) return toast('Enter or pick the dispensary website'); api().open_login(u); };
+$('#wopen').onclick = () => { return; const u = $('#wsite').value.trim(); if (!u) return toast('Enter or pick the dispensary website'); api().open_login(u); };
 $('#wread').onclick = async () => {
   const r = await api().read_rewards();
   if (r.error) return toast(r.error);
