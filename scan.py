@@ -941,6 +941,32 @@ def ordering_menu(store, area, cache):
     return pages
 
 
+def jointcommerce_menu(store, reader, ctx):
+    """The store's live menu on JointCommerce (public pages: /dispensaries/<store>/menu?page=N, sale items via ?on_sale=1).
+    Covers chains whose own sites hide the menu behind store pickers (Curaleaf, Fluent…)."""
+    s = re.sub(r"[^a-z0-9]+", "-", store["name"].lower().replace("ü", "u")).strip("-")
+    base = f"https://www.jointcommerce.com/dispensaries/{s}/menu"
+    c2 = {**ctx, "more": 0}
+    prods, deals, seen, pages, t_end = [], [], set(), [], time.time() + 90
+    for n in range(0, 16):
+        if time.time() > t_end:
+            break
+        url = base + "?on_sale=1" if n == 0 else base + ("" if n == 1 else f"?page={n}")
+        r = reader(url, c2) or {}
+        got = page_products(r, r.get("url") or url, ctx)
+        deals += [{"text": t, "src": url} for t in (r.get("lines") or [])]
+        new = [p for p in got if (p["name"].lower(), p["price"]) not in seen]
+        for p in new:
+            seen.add((p["name"].lower(), p["price"]))
+        prods += new
+        if new:
+            pages.append(url)
+        elif n >= 1:
+            break  # past the last page (or the store isn't on JointCommerce)
+    return bool(prods), {"t": time.time(), "deals": deals[:40], "products": prods, "pages": pages,
+                         "from": f"{store['name'].split(' - ')[0]} live menu (JointCommerce)"}
+
+
 def read_menu_pages(pages, reader, ctx, label):
     rc = {"key": "menu", "pages": lambda st: pages, "follow": None, "more": 8}
     ok, data = read_recipe(rc, {"city": ctx.get("city", "")}, reader, ctx)
@@ -1045,7 +1071,11 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
     if only_host:
         todo = [k for k in jobs if k == only_host]
     else:
-        todo = [k for k in jobs if force or time.time() - cache["sites"].get(k, {}).get("t", 0) > SITE_TTL
+        def stale(k):
+            e = cache["sites"].get(k, {})
+            age = time.time() - e.get("t", 0)
+            return age > SITE_TTL or (not e.get("products") and age > 10 * 60)  # empty results get retried soon
+        todo = [k for k in jobs if force or stale(k)
                 or (not use_leafly and "Leafly" in cache["sites"].get(k, {}).get("from", ""))]
     base_ctx = {**area, "agree": agree}
 
@@ -1058,6 +1088,11 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
         if rc:
             ok, data = read_recipe(rc, st, reader, ctx)
             data["from"] = f"{re.sub(r'\s*[-–].*$', '', st['name'])} website ({st.get('city', '')} store)"
+            if not data["products"] and reader:
+                okj, dj = jointcommerce_menu(st, reader, ctx)
+                if dj["products"]:
+                    dj["deals"] = data["deals"] + dj["deals"]
+                    return okj, dj
             if use_leafly and not data["products"] and st.get("leafly") and st.get("hasMenu"):
                 ok2, d2 = leafly_menu(st["leafly"], reader)
                 if d2["products"]:
@@ -1071,6 +1106,10 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
                 ok, data = read_menu_pages(pages, reader, {**ctx, "city": st.get("city") or ""}, f"{st['name'].split(' - ')[0]} online ordering menu")
                 if data["products"]:
                     return ok, data
+            if reader:
+                okj, dj = jointcommerce_menu(st, reader, ctx)
+                if dj["products"]:
+                    return okj, dj
             if not use_leafly:
                 return True, {"t": time.time(), "deals": [], "products": [], "from": "couldn't find this store's website or online menu"}
             if not st.get("hasMenu"):
@@ -1087,6 +1126,11 @@ def scan(lat, lon, miles, force=False, progress=None, reader=None, agree=False, 
                 if d2["products"]:
                     d2["deals"] = data["deals"] + d2["deals"]
                     return ok2, d2
+        if not data["products"] and reader:
+            okj, dj = jointcommerce_menu(st, reader, ctx)
+            if dj["products"]:
+                dj["deals"] = data["deals"] + dj["deals"]
+                return okj, dj
         if use_leafly and not data["products"] and st.get("leafly") and st.get("hasMenu"):
             ok2, d2 = leafly_menu(st["leafly"], reader)
             if d2["products"]:

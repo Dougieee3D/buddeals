@@ -15,7 +15,7 @@ import webview
 import desktop
 import scan
 
-APP_VERSION = "2.12.0"
+APP_VERSION = "2.12.1"
 REPO = "Dougieee3D/buddeals"
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STORE_FILE = os.path.join(scan.DATA_DIR, "store.json")
@@ -52,7 +52,7 @@ const isSt=x=>{x=T(x).toLowerCase().replace(/[^a-z ]/g,' ').replace(/\s+/g,' ').
 const stSel=[...document.querySelectorAll('select')].filter(x=>x.options.length>=3&&[...x.options].filter(o=>SL.some(p=>T(o.text).toLowerCase()===p[0]||T(o.text).toLowerCase()===p[1])).length>=3);
 if(SP&&(stSel.length||/(select|choose|pick|confirm|enter) (your |a |the )?state|which state|what state|state you('| a)re (in|shopping)|where are you (located|shopping)/.test(body))){
  const sel=stSel.find(x=>[...x.options].some(o=>isSt(o.text)||isSt(o.value)));
- if(sel){const o=[...sel.options].find(o=>isSt(o.text)||isSt(o.value));if(sel.value!==o.value){sel.value=o.value;sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}));did.push('state')}
+ if(sel){const o=[...sel.options].find(o=>isSt(o.text)||isSt(o.value));if(sel.value!==o.value){Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(sel,o.value);sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}));did.push('state')}
   const go=cl().find(x=>/^(enter|continue|submit|go|confirm|shop now|start shopping|enter site|next)$/.test(T(x.innerText||x.value).toLowerCase()));if(go&&click(go))did.push('state-go')}
  else{const opt=[...document.querySelectorAll('[role=option],li,button,a,label,span,div,p,img')].filter(vis).find(e=>e.children.length<3&&(isSt(e.innerText||'')||isSt(e.getAttribute('alt')||'')||isSt(e.getAttribute('aria-label')||'')));
   if(opt){click(opt);did.push('state')}else{const cb=[...document.querySelectorAll('[role=combobox],[aria-haspopup],select')].filter(vis)[0];if(cb){click(cb);did.push('open-state')}}}}
